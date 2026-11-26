@@ -22,7 +22,7 @@ pub fn load_program(memory: &mut Memory, address: u32, words: &[u32]) {
     }
 }
 
-pub fn run_steps(cpu: &mut Cpu, memory: &Memory, steps: usize) {
+pub fn run_steps(cpu: &mut Cpu, memory: &mut Memory, steps: usize) {
     for _ in 0..steps {
         cpu.step(memory);
     }
@@ -35,6 +35,6 @@ pub fn run(words: &[u32], regs: &[(usize, u32)]) -> Cpu {
         cpu.write_reg(index, value);
     }
     load_program(&mut memory, 0, words);
-    run_steps(&mut cpu, &memory, words.len());
+    run_steps(&mut cpu, &mut memory, words.len());
     cpu
 }

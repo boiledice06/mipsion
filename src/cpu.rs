@@ -39,14 +39,14 @@ impl Cpu {
         w
     }
 
-    pub fn step(&mut self, memory: &Memory) {
+    pub fn step(&mut self, memory: &mut Memory) {
         // Fetch -> RawInstruction -> Decode -> Execute
         let w = self.fetch(memory);
         let raw_inst = RawInstruction::new(w);
 
         let decoded = decode(w).unwrap();
 
-        execute(self, &raw_inst, &decoded.operation);
+        execute(self, memory, &raw_inst, &decoded.operation);
     }
 
     pub fn read_hi(&self) -> u32 {

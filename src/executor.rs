@@ -4,7 +4,9 @@ use crate::isa::Operation;
 
 use crate::alu::{accumulate, compute, divide, extract, insert, multiply};
 
-pub fn execute(cpu: &mut Cpu, inst: &RawInstruction, operation: &Operation) {
+use crate::memory::Memory;
+
+pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     match operation {
         Operation::Add
         | Operation::Addu
@@ -195,6 +197,45 @@ pub fn execute(cpu: &mut Cpu, inst: &RawInstruction, operation: &Operation) {
             let result = accumulate(a, b, acc, signed, subtract);
 
             cpu.write_hilo(result);
+        }
+
+        Operation::Lw | Operation::Lh | Operation::Lhu | Operation::Lb | Operation::Lbu => {
+            let rs = inst.rs() as usize;
+            let rt = inst.rt() as usize;
+
+            let base = cpu.read_reg(rs);
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = base.wrapping_add(offset);
+
+            let result = match operation {
+                Operation::Lw => memory.read_word(address),
+                Operation::Lh => memory.read_halfword(address) as i16 as i32 as u32,
+                Operation::Lhu => memory.read_halfword(address) as u32,
+                Operation::Lb => memory.read_byte(address) as i8 as i32 as u32,
+                Operation::Lbu => memory.read_byte(address) as u32,
+                _ => unreachable!(),
+            };
+
+            cpu.write_reg(rt, result);
+        }
+
+        Operation::Sw | Operation::Sh | Operation::Sb => {
+            let rs = inst.rs() as usize;
+            let rt = inst.rt() as usize;
+
+            let base = cpu.read_reg(rs);
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = base.wrapping_add(offset);
+            let value = cpu.read_reg(rt);
+
+            match operation {
+                Operation::Sw => memory.write_word(address, value),
+                Operation::Sh => memory.write_halfword(address, value as u16),
+                Operation::Sb => memory.write_byte(address, value as u8),
+                _ => unreachable!(),
+            }
         }
         _ => todo!(
             "Instruction not implemented: opcode={:#04x}, funct={:#04x}",

@@ -165,7 +165,7 @@ fn immediate_logic() {
     memory.write_word(12, 0x3C0D8001); // lui
 
     for _ in 0..4 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), 0x00008001);
@@ -182,8 +182,8 @@ fn immediate_comparison() {
     memory.write_word(0, 0x2808FFFF); // slti
     memory.write_word(4, 0x2C09FFFF); // sltiu
 
-    cpu.step(&memory);
-    cpu.step(&memory);
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
 
     assert_eq!(cpu.read_reg(8), 0);
     assert_eq!(cpu.read_reg(9), 1);
@@ -204,7 +204,7 @@ fn variable_shifts_and_rotate() {
     memory.write_word(16, 0x01287046); // rotrv
 
     for _ in 0..5 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), 0x00000038);
@@ -230,7 +230,7 @@ fn bit_manipulation() {
     memory.write_word(16, 0x7C0A78A0); // wsbh
 
     for _ in 0..5 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(11), 16);
@@ -264,7 +264,7 @@ fn bit_field_operations() {
     memory.write_word(4, 0x7D097A04); // ins
 
     for _ in 0..2 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), 0x56);
@@ -299,7 +299,7 @@ fn multiplication() {
     memory.write_word(24, 0x00007012); // mflo
 
     for _ in 0..7 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), 0xFFFFFFFE);
@@ -327,7 +327,7 @@ fn division() {
     memory.write_word(20, 0x00006812); // mflo
 
     for _ in 0..6 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), (-2i32) as u32);
@@ -351,7 +351,7 @@ fn hilo_transfer() {
     memory.write_word(12, 0x00005812); // mflo
 
     for _ in 0..4 {
-        cpu.step(&memory);
+        cpu.step(&mut memory);
     }
 
     assert_eq!(cpu.read_reg(10), 0x12345678);
@@ -373,16 +373,16 @@ fn multiply_accumulate() {
     memory.write_word(8, 0x71090004); // msub
     memory.write_word(12, 0x71090005); // msubu
 
-    cpu.step(&memory);
+    cpu.step(&mut memory);
     assert_eq!(cpu.read_hilo(), 0xFFFFFFFFFFFFFFFE);
 
-    cpu.step(&memory);
+    cpu.step(&mut memory);
     assert_eq!(cpu.read_hilo(), 0x00000001FFFFFFFC);
 
-    cpu.step(&memory);
+    cpu.step(&mut memory);
     assert_eq!(cpu.read_hilo(), 0x00000001FFFFFFFE);
 
-    cpu.step(&memory);
+    cpu.step(&mut memory);
     assert_eq!(cpu.read_hilo(), 0);
 }
 
@@ -393,4 +393,53 @@ fn accumulate_wrap() {
     assert_eq!(accumulate(1, 2, u64::MAX, false, false), 1);
 
     assert_eq!(accumulate(1, 1, 0, false, true), u64::MAX);
+}
+
+#[test]
+fn load_store() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_reg(8, 256);
+    cpu.write_reg(9, 0x12348081);
+
+    memory.write_word(0, 0xAD090000); // sw
+    memory.write_word(4, 0x8D0A0000); // lw
+    memory.write_word(8, 0x810B0000); // lb
+    memory.write_word(12, 0x910C0000); // lbu
+    memory.write_word(16, 0x850D0000); // lh
+    memory.write_word(20, 0x950E0000); // lhu
+    memory.write_word(24, 0xA5090004); // sh
+    memory.write_word(28, 0xA1090006); // sb
+
+    for _ in 0..8 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_reg(10), 0x12348081);
+    assert_eq!(cpu.read_reg(11), 0xFFFFFF81);
+    assert_eq!(cpu.read_reg(12), 0x00000081);
+    assert_eq!(cpu.read_reg(13), 0xFFFF8081);
+    assert_eq!(cpu.read_reg(14), 0x00008081);
+
+    assert_eq!(memory.read_halfword(260), 0x8081);
+    assert_eq!(memory.read_byte(262), 0x81);
+}
+
+#[test]
+fn memory_negative_offset() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_reg(8, 256);
+    cpu.write_reg(9, 0xDEADBEEF);
+
+    memory.write_word(0, 0xAD09FFFC); // sw -4
+    memory.write_word(4, 0x8D0AFFFC); // lw -4
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_word(252), 0xDEADBEEF);
+    assert_eq!(cpu.read_reg(10), 0xDEADBEEF);
 }

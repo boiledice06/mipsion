@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod alu;
 mod cpu;
 mod decoder;
