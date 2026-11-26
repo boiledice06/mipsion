@@ -2,9 +2,18 @@ use crate::cpu::Cpu;
 use crate::instruction::RawInstruction;
 use crate::isa::Operation;
 
+use crate::alu::compute;
+
 pub fn execute(cpu: &mut Cpu, inst: &RawInstruction, operation: &Operation) {
     match operation {
-        Operation::Add => {
+        Operation::Add
+        | Operation::Addu
+        | Operation::Sub
+        | Operation::Subu
+        | Operation::And
+        | Operation::Or
+        | Operation::Xor
+        | Operation::Nor => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
             let rd = inst.rd() as usize;
@@ -12,28 +21,21 @@ pub fn execute(cpu: &mut Cpu, inst: &RawInstruction, operation: &Operation) {
             let a = cpu.read_reg(rs);
             let b = cpu.read_reg(rt);
 
-            cpu.write_reg(rd, a + b);
+            let result = compute(a, b, operation);
+
+            cpu.write_reg(rd, result);
         }
-        Operation::Addu => {
+
+        Operation::Addi | Operation::Addiu => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
-            let rd = inst.rd() as usize;
 
             let a = cpu.read_reg(rs);
-            let b = cpu.read_reg(rt);
+            let b = inst.immediate() as i16 as i32 as u32;
 
-            cpu.write_reg(rd, a.wrapping_add(b));
+            let result = compute(a, b, operation);
+
+            cpu.write_reg(rt, result);
         }
-        Operation::Addi => {
-            let rs = inst.rs() as usize;
-            let rt = inst.rt() as usize;
-
-            let imm = inst.immediate() as i16 as i32;
-            let rreg = cpu.read_reg(rs) as i32;
-
-            cpu.write_reg(rt, rreg.wrapping_add(imm) as u32);
-        }
-
-        _ => todo!("Instruction not implemented"),
     }
 }
