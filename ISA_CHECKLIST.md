@@ -1,4 +1,4 @@
-# MIPSium — MIPS32 Release 2 ISA 체크리스트
+# MIPSion — MIPS32 Release 2 ISA 체크리스트
 
 기준은 MIPS Technologies의 **MD00086 Rev. 2.62** §3.1, §3.2, 개별 명령어 페이지, Appendix A다. 표의 페이지는 인쇄본 번호다. JALX의 32-bit 인코딩은 **MD00076 Rev. 2.50** p.76도 참조한다. [Volume II](https://www.cse.iitb.ac.in/~br/courses/cs305-autumn2011/labs/lab05/MD00086-2B-MIPS32BIS-AFP-02_62.pdf) · [Volume IV-a](https://www.0x04.net/~mwk/doc/mips/MD00076-2B-MIPS1632-AFP-02.50.pdf)
 

@@ -1,8 +1,8 @@
-# MIPSium
+# MIPSion
 
 A MIPS32 Release 2 emulator written in Rust.
 
-MIPSium is a personal project exploring instruction set architecture, CPU emulation, and microarchitecture through a modular implementation of MIPS32 Release 2.
+MIPSion is a personal project exploring instruction set architecture, CPU emulation, and microarchitecture through a modular implementation of MIPS32 Release 2.
 
 The long-term goal is to provide an interactive graphical environment for executing, debugging, and visualizing MIPS programs.
 

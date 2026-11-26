@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "mipsium"
+name = "mipsion"
 version = "0.1.0"
