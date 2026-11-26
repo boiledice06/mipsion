@@ -14,12 +14,12 @@ impl Memory {
     }
 
     pub fn write_byte(&mut self, address: u32, value: u8) {
-        self.data[address as usize] = value
+        self.data[address as usize] = value;
     }
 
     pub fn read_halfword(&self, address: u32) -> u16 {
-        let low = self.data[address as usize];
-        let high = self.data[address as usize + 1];
+        let low = self.read_byte(address);
+        let high = self.read_byte(address + 1);
 
         (low as u16) | ((high as u16) << 8)
     }

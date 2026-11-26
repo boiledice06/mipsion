@@ -7,6 +7,8 @@ use crate::instruction::RawInstruction;
 use crate::cp0::Cp0;
 use crate::exception::Exception;
 
+use crate::mmu::{AccessType, Mmu};
+
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
     pc: u32,        // Program Counter
@@ -48,18 +50,20 @@ impl Cpu {
         }
     }
 
-    pub fn fetch(&mut self, memory: &Memory) -> u32 {
+    pub fn fetch(&mut self, memory: &Memory) -> Option<u32> {
         self.current_pc = self.pc;
 
         self.in_delay_slot = self.next_delay_slot;
         self.next_delay_slot = false;
 
-        let word = memory.read_word(self.pc);
+        let address = self.translate_address(self.pc, AccessType::Fetch)?;
+
+        let word = memory.read_word(address);
 
         self.pc = self.next_pc;
         self.next_pc = self.next_pc.wrapping_add(4);
 
-        word
+        Some(word)
     }
 
     pub fn step(&mut self, memory: &mut Memory) {
@@ -69,6 +73,16 @@ impl Cpu {
 
         self.cp0.tick();
 
+        // Interrupt 검사
+        if self.cp0.interrupt_requested() {
+            self.current_pc = self.pc;
+            self.in_delay_slot = self.next_delay_slot;
+
+            self.raise_exception(Exception::Interrupt, None);
+            return;
+        }
+
+        // Instruction Alignment 검사
         if self.pc & 3 != 0 {
             self.current_pc = self.pc;
             self.in_delay_slot = self.next_delay_slot;
@@ -77,7 +91,11 @@ impl Cpu {
             return;
         }
 
-        let word = self.fetch(memory);
+        // 주소 변환 실패 시 실행 중단
+        let Some(word) = self.fetch(memory) else {
+            return;
+        };
+
         let raw_inst = RawInstruction::new(word);
 
         match decode(word) {
@@ -141,6 +159,10 @@ impl Cpu {
         &self.cp0
     }
 
+    pub fn cp0_mut(&mut self) -> &mut Cp0 {
+        &mut self.cp0
+    }
+
     pub fn mark_delay_slot(&mut self) {
         self.next_delay_slot = true;
     }
@@ -149,7 +171,22 @@ impl Cpu {
         self.cp0
             .enter_exception(exception, self.current_pc, self.in_delay_slot, bad_address);
 
-        self.halted = true;
+        // Exception Handler로 실행 흐름 이동
+        let vector = self.cp0.exception_vector(exception);
+        self.write_pc(vector);
+
+        self.in_delay_slot = false;
+        self.next_delay_slot = false;
+
+        self.clear_reservation();
+    }
+
+    pub fn return_from_exception(&mut self) {
+        let address = self.cp0.return_from_exception();
+
+        // 복귀 주소로 즉시 이동
+        self.write_pc(address);
+
         self.in_delay_slot = false;
         self.next_delay_slot = false;
 
@@ -170,5 +207,17 @@ impl Cpu {
 
     pub fn clear_reservation(&mut self) {
         self.reservation = None;
+    }
+
+    pub fn translate_address(&mut self, address: u32, access: AccessType) -> Option<u32> {
+        match Mmu::translate(address, self.cp0.privilege_mode(), access) {
+            Ok(physical) => Some(physical),
+
+            Err(exception) => {
+                self.raise_exception(exception, Some(address));
+
+                None
+            }
+        }
     }
 }

@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Exception {
+    Interrupt = 0,
     AddressErrorLoad = 4,
     AddressErrorStore = 5,
     Syscall = 8,

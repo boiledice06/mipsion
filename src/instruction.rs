@@ -35,6 +35,10 @@ impl RawInstruction {
         self.extract(0, 6) as u8
     }
 
+    pub fn sel(&self) -> u8 {
+        self.extract(0, 3) as u8
+    }
+
     pub fn immediate(&self) -> u16 {
         self.extract(0, 16) as u16
     }

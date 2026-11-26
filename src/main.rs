@@ -7,6 +7,8 @@ mod executor;
 mod instruction;
 mod isa;
 mod memory;
+mod mmu;
+mod tlb;
 
 mod cp0;
 mod exception;

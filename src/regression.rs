@@ -816,7 +816,8 @@ fn exception_state() {
     assert_eq!(cpu.cp0().read_epc(), 0);
     assert!(cpu.cp0().exception_level());
     assert!(!cpu.cp0().branch_delay());
-    assert!(cpu.is_halted());
+    assert!(!cpu.is_halted());
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
 }
 
 #[test]
@@ -866,7 +867,8 @@ fn arithmetic_overflow() {
     ] {
         let cpu = run(&[word], &[(8, a), (9, b), (10, 0xDEADBEEF)]);
 
-        assert!(cpu.is_halted());
+        assert!(!cpu.is_halted());
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
         assert_eq!(cpu.cp0().exception_code(), 12);
         assert_eq!(cpu.cp0().read_epc(), 0);
         assert_eq!(cpu.read_reg(10), 0xDEADBEEF);
@@ -878,7 +880,8 @@ fn system_exception() {
     for (word, code) in [(0x0000000C, 8), (0x0000000D, 9)] {
         let cpu = run(&[word], &[]);
 
-        assert!(cpu.is_halted());
+        assert!(!cpu.is_halted());
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
         assert_eq!(cpu.cp0().exception_code(), code);
         assert!(cpu.cp0().exception_level());
         assert_eq!(cpu.cp0().read_epc(), 0);
@@ -903,7 +906,13 @@ fn register_trap() {
     ] {
         let cpu = run(&[encode_r(0, 8, 9, 0, 0, funct)], &[(8, a), (9, b)]);
 
-        assert_eq!(cpu.is_halted(), expected);
+        assert!(!cpu.is_halted());
+
+        if expected {
+            assert_eq!(cpu.read_pc(), 0x8000_0180);
+        } else {
+            assert_eq!(cpu.read_pc(), 4);
+        }
         assert_eq!(cpu.cp0().exception_code(), if expected { 13 } else { 0 });
     }
 }
@@ -926,7 +935,13 @@ fn immediate_trap() {
     ] {
         let cpu = run(&[i(1, 8, rt, imm)], &[(8, a)]);
 
-        assert_eq!(cpu.is_halted(), expected);
+        assert!(!cpu.is_halted());
+
+        if expected {
+            assert_eq!(cpu.read_pc(), 0x8000_0180);
+        } else {
+            assert_eq!(cpu.read_pc(), 4);
+        }
         assert_eq!(cpu.cp0().exception_code(), if expected { 13 } else { 0 });
     }
 }
@@ -946,7 +961,8 @@ fn arithmetic_delay_slot_exception() {
     cpu.step(&mut memory);
     cpu.step(&mut memory);
 
-    assert!(cpu.is_halted());
+    assert!(!cpu.is_halted());
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
     assert!(cpu.cp0().branch_delay());
     assert_eq!(cpu.cp0().read_epc(), 0);
     assert_eq!(cpu.cp0().exception_code(), 12);
@@ -975,7 +991,8 @@ fn memory_alignment_exception() {
 
         cpu.step(&mut memory);
 
-        assert!(cpu.is_halted());
+        assert!(!cpu.is_halted());
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
         assert_eq!(cpu.cp0().exception_code(), code);
         assert_eq!(cpu.cp0().read_bad_vaddr(), address);
         assert_eq!(cpu.cp0().read_epc(), 0);
@@ -993,7 +1010,8 @@ fn instruction_alignment_exception() {
     cpu.write_pc(3);
     cpu.step(&mut memory);
 
-    assert!(cpu.is_halted());
+    assert!(!cpu.is_halted());
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
     assert_eq!(cpu.cp0().exception_code(), 4);
     assert_eq!(cpu.cp0().read_bad_vaddr(), 3);
     assert_eq!(cpu.cp0().read_epc(), 3);
@@ -1188,8 +1206,1509 @@ fn hardware_register_read() {
 fn invalid_hardware_register() {
     let cpu = run(&[encode_r(0x1F, 0, 8, 15, 0, 0x3B)], &[(8, 0xDEADBEEF)]);
 
-    assert!(cpu.is_halted());
+    assert!(!cpu.is_halted());
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
     assert_eq!(cpu.cp0().exception_code(), 10);
     assert_eq!(cpu.cp0().read_epc(), 0);
     assert_eq!(cpu.read_reg(8), 0xDEADBEEF);
+}
+
+fn encode_cp0(rs: u32, rt: u32, rd: u32, sel: u32) -> u32 {
+    assert!(sel < 8);
+    encode_r(0x10, rs, rt, rd, 0, sel)
+}
+
+#[test]
+fn decode_cp0_transfer() {
+    use crate::decoder::decode;
+
+    for (word, mnemonic) in [
+        (0x40086000, "mfc0"),
+        (0x40886000, "mtc0"),
+        (0x40082002, "mfc0"),
+        (0x40882002, "mtc0"),
+    ] {
+        assert_eq!(decode(word).map(|inst| inst.mnemonic), Some(mnemonic));
+    }
+}
+
+#[test]
+fn cp0_register_transfer() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 12, 0),
+            encode_cp0(0, 9, 12, 0),
+            encode_cp0(4, 10, 14, 0),
+            encode_cp0(0, 11, 14, 0),
+        ],
+        &[(8, 0x0000_FF01), (10, 0x8000_1000)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x0000_FF01);
+    assert_eq!(cpu.read_reg(11), 0x8000_1000);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn cp0_write_mask() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 12, 0),
+            encode_cp0(0, 9, 12, 0),
+            encode_cp0(4, 8, 13, 0),
+            encode_cp0(0, 10, 13, 0),
+            encode_cp0(4, 8, 7, 0),
+            encode_cp0(0, 11, 7, 0),
+        ],
+        &[(8, u32::MAX)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x1040_FF1F);
+    assert_eq!(cpu.read_reg(10), 0x0080_0300);
+    assert_eq!(cpu.read_reg(11), 0x2000_000F);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn cp0_read_only_register() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 8, 0), encode_cp0(0, 9, 8, 0)],
+        &[(8, 0xDEADBEEF)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn cp0_user_local_transfer() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 4, 2),
+            encode_cp0(0, 9, 4, 2),
+            encode_r(0x1F, 0, 10, 29, 0, 0x3B),
+        ],
+        &[(8, 0x1234_5678)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x1234_5678);
+    assert_eq!(cpu.read_reg(10), 0x1234_5678);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn cp0_count_transfer() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 9, 0), encode_cp0(0, 9, 9, 0)],
+        &[(8, 100)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 101);
+    assert_eq!(cpu.cp0().read_count(), 101);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn invalid_cp0_register() {
+    for word in [encode_cp0(0, 8, 31, 7), encode_cp0(4, 8, 31, 7)] {
+        let cpu = run(&[word], &[(8, 0xDEADBEEF)]);
+
+        assert!(!cpu.is_halted());
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
+        assert_eq!(cpu.cp0().exception_code(), 10);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+        assert_eq!(cpu.read_reg(8), 0xDEADBEEF);
+    }
+}
+
+#[test]
+fn decode_interrupt_control() {
+    use crate::decoder::decode;
+
+    for (word, mnemonic) in [
+        (0x41606000, "di"),
+        (0x41606020, "ei"),
+        (0x41686000, "di"),
+        (0x41686020, "ei"),
+    ] {
+        assert_eq!(decode(word).map(|inst| inst.mnemonic), Some(mnemonic));
+    }
+}
+
+#[test]
+fn enable_interrupt() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 12, 0),
+            0x41696020, // ei $t1
+        ],
+        &[(8, 0x0000_FF00)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x0000_FF00);
+    assert_eq!(cpu.cp0().read_status(), 0x0000_FF01);
+    assert!(cpu.cp0().interrupt_enabled());
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn disable_interrupt() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 12, 0),
+            0x41696000, // di $t1
+        ],
+        &[(8, 0x0000_FF01)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x0000_FF01);
+    assert_eq!(cpu.cp0().read_status(), 0x0000_FF00);
+    assert!(!cpu.cp0().interrupt_enabled());
+    assert!(!cpu.is_halted());
+}
+#[test]
+fn interrupt_control_zero_register() {
+    for (word, status, expected) in [(0x41606020, 0xFF00, 0xFF01), (0x41606000, 0xFF01, 0xFF00)] {
+        let cpu = run(&[encode_cp0(4, 8, 12, 0), word], &[(8, status)]);
+
+        assert_eq!(cpu.read_reg(0), 0);
+        assert_eq!(cpu.cp0().read_status(), expected);
+        assert!(!cpu.is_halted());
+    }
+}
+
+#[test]
+fn repeated_interrupt_control() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 12, 0),
+            0x41696020, // ei $t1
+            0x416A6020, // ei $t2
+            0x416B6000, // di $t3
+            0x416C6000, // di $t4
+        ],
+        &[(8, 0x0040_FF06)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x0040_FF06);
+    assert_eq!(cpu.read_reg(10), 0x0040_FF07);
+    assert_eq!(cpu.read_reg(11), 0x0040_FF07);
+    assert_eq!(cpu.read_reg(12), 0x0040_FF06);
+
+    assert_eq!(cpu.cp0().read_status(), 0x0040_FF06);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn general_exception_vector() {
+    let cpu = run(&[0x0000000C], &[]);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.read_next_pc(), 0x8000_0184);
+
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert_eq!(cpu.cp0().exception_code(), 8);
+    assert!(cpu.cp0().exception_level());
+
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn bootstrap_exception_vector() {
+    let cpu = run(&[encode_cp0(4, 8, 12, 0), 0x0000000C], &[(8, 1 << 22)]);
+
+    assert_eq!(cpu.read_pc(), 0xBFC0_0380);
+    assert_eq!(cpu.read_next_pc(), 0xBFC0_0384);
+
+    assert_eq!(cpu.cp0().read_epc(), 4);
+    assert!(cpu.cp0().exception_level());
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn relocated_exception_vector() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 15, 1), encode_cp0(0, 9, 15, 1), 0x0000000C],
+        &[(8, 0x8000_2000)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x8000_2000);
+    assert_eq!(cpu.cp0().read_ebase(), 0x8000_2000);
+
+    assert_eq!(cpu.read_pc(), 0x8000_2180);
+    assert_eq!(cpu.cp0().read_epc(), 8);
+}
+
+#[test]
+fn ebase_write_mask() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 15, 1), encode_cp0(0, 9, 15, 1)],
+        &[(8, u32::MAX)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0xBFFF_F000);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn memory_segment_alias() {
+    use crate::cp0::PrivilegeMode;
+    use crate::mmu::{AccessType, Mmu};
+
+    let mut memory = Memory::new(1024);
+
+    let a = Mmu::translate(0x8000_0180, PrivilegeMode::Kernel, AccessType::Load).unwrap();
+
+    let b = Mmu::translate(0xA000_0180, PrivilegeMode::Kernel, AccessType::Store).unwrap();
+
+    assert_eq!(a, 0x180);
+    assert_eq!(b, 0x180);
+
+    memory.write_word(a, 0x1234_5678);
+    assert_eq!(memory.read_word(b), 0x1234_5678);
+
+    memory.write_word(b, 0xDEAD_BEEF);
+    assert_eq!(memory.read_word(a), 0xDEAD_BEEF);
+}
+
+#[test]
+fn exception_handler_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    memory.write_word(0, 0x0000000C);
+
+    // Exception Handler
+    memory.write_word(0x180, encode_cp0(0, 8, 14, 0));
+
+    memory.write_word(0x184, encode_cp0(0, 9, 13, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 0);
+    assert_eq!(cpu.read_reg(9), 8 << 2);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0188);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn delay_slot_exception_vector() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    memory.write_word(0, i(4, 0, 0, 3));
+    memory.write_word(4, 0x0000000C);
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.read_next_pc(), 0x8000_0184);
+
+    assert!(cpu.cp0().branch_delay());
+    assert_eq!(cpu.cp0().read_epc(), 0);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0184);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn nested_exception_preserves_epc() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    memory.write_word(4, 0x0000000C);
+    memory.write_word(0x180, 0x0000000D);
+
+    cpu.write_pc(4);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().read_epc(), 4);
+    assert_eq!(cpu.cp0().exception_code(), 8);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().read_epc(), 4);
+    assert_eq!(cpu.cp0().exception_code(), 9);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert!(cpu.cp0().exception_level());
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn decode_eret() {
+    use crate::decoder::decode;
+
+    assert_eq!(decode(0x42000018).map(|inst| inst.mnemonic), Some("eret"));
+
+    assert_ne!(decode(0x42010018).map(|inst| inst.mnemonic), Some("eret"));
+}
+
+#[test]
+fn error_epc_transfer() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 30, 0), encode_cp0(0, 9, 30, 0)],
+        &[(8, 0x8000_1000)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 0x8000_1000);
+    assert_eq!(cpu.cp0().read_error_epc(), 0x8000_1000);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn exception_return() {
+    let cpu = run(
+        &[encode_cp0(4, 8, 14, 0), encode_cp0(4, 9, 12, 0), 0x42000018],
+        &[(8, 0x100), (9, 0x0000_FF03)],
+    );
+
+    assert_eq!(cpu.read_pc(), 0x100);
+    assert_eq!(cpu.read_next_pc(), 0x104);
+
+    assert_eq!(cpu.cp0().read_status(), 0x0000_FF01);
+    assert!(!cpu.cp0().exception_level());
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn error_level_return() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 14, 0),
+            encode_cp0(4, 9, 30, 0),
+            encode_cp0(4, 10, 12, 0),
+            0x42000018,
+        ],
+        &[(8, 0x100), (9, 0x200), (10, 0x0000_0006)],
+    );
+
+    assert_eq!(cpu.read_pc(), 0x200);
+    assert_eq!(cpu.read_next_pc(), 0x204);
+
+    assert!(!cpu.cp0().error_level());
+    assert!(cpu.cp0().exception_level());
+
+    assert_eq!(cpu.cp0().read_status(), 2);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn eret_without_delay_slot() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(14, 0, 0x100);
+    cpu.cp0_mut().write_reg(12, 0, 2);
+
+    memory.write_word(0, 0x42000018);
+
+    memory.write_word(4, i(9, 0, 8, 100));
+    memory.write_word(0x100, i(9, 0, 9, 200));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x100);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 0);
+    assert_eq!(cpu.read_reg(9), 200);
+
+    assert_eq!(cpu.read_pc(), 0x104);
+}
+#[test]
+fn eret_clears_reservation() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(14, 0, 0x100);
+    cpu.cp0_mut().write_reg(12, 0, 2);
+
+    cpu.set_reservation(256);
+
+    memory.write_word(0, 0x42000018);
+
+    assert!(cpu.check_reservation(256));
+
+    cpu.step(&mut memory);
+
+    assert!(!cpu.check_reservation(256));
+    assert_eq!(cpu.read_pc(), 0x100);
+}
+
+#[test]
+fn complete_exception_cycle() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    // Main Program
+    memory.write_word(0x000, i(9, 0, 8, 100));
+    memory.write_word(0x004, 0x0000000C);
+    memory.write_word(0x008, i(9, 0, 9, 200));
+
+    // Exception Handler
+    memory.write_word(0x180, encode_cp0(0, 26, 14, 0));
+
+    memory.write_word(0x184, i(9, 26, 26, 4));
+
+    memory.write_word(0x188, encode_cp0(4, 26, 14, 0));
+
+    memory.write_word(0x18C, 0x42000018);
+
+    // Main Program 실행
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+
+    // SYSCALL
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().read_epc(), 4);
+    assert!(cpu.cp0().exception_level());
+
+    // Exception Handler 실행
+    for _ in 0..4 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_pc(), 8);
+    assert_eq!(cpu.cp0().read_epc(), 8);
+    assert!(!cpu.cp0().exception_level());
+
+    // Main Program 복귀
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(cpu.read_reg(9), 200);
+    assert_eq!(cpu.read_pc(), 12);
+
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn privilege_mode_selection() {
+    use crate::cp0::{Cp0, PrivilegeMode};
+
+    let mut cp0 = Cp0::new();
+
+    for (status, expected) in [
+        (0x00, PrivilegeMode::Kernel),
+        (0x08, PrivilegeMode::Supervisor),
+        (0x10, PrivilegeMode::User),
+        (0x18, PrivilegeMode::Reserved),
+    ] {
+        cp0.write_reg(12, 0, status);
+
+        assert_eq!(cp0.privilege_mode(), expected);
+    }
+}
+
+#[test]
+fn exception_privilege_override() {
+    use crate::cp0::{Cp0, PrivilegeMode};
+
+    let mut cp0 = Cp0::new();
+
+    for status in [0x12, 0x14, 0x16, 0x0A, 0x0C] {
+        cp0.write_reg(12, 0, status);
+
+        assert_eq!(cp0.privilege_mode(), PrivilegeMode::Kernel);
+    }
+}
+
+#[test]
+fn user_cp0_access_denied() {
+    for word in [
+        encode_cp0(0, 8, 12, 0), // mfc0
+        encode_cp0(4, 8, 12, 0), // mtc0
+        0x41686020,              // ei
+        0x41686000,              // di
+        0x42000018,              // eret
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(1024);
+
+        cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+        cpu.write_reg(8, 0xDEAD_BEEF);
+        memory.write_word(0, word);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+        assert_eq!(cpu.read_reg(8), 0xDEAD_BEEF);
+
+        assert_eq!((cpu.cp0().read_cause() >> 28) & 3, 0);
+
+        assert!(cpu.cp0().is_kernel_mode());
+        assert!(!cpu.is_halted());
+    }
+}
+
+#[test]
+fn user_cp0_access_enabled() {
+    use crate::cp0::PrivilegeMode;
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x1000_0010);
+
+    memory.write_word(0, encode_cp0(0, 8, 12, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 0x1000_0010);
+    assert_eq!(cpu.read_pc(), 4);
+
+    assert_eq!(cpu.cp0().privilege_mode(), PrivilegeMode::User);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn supervisor_cp0_access() {
+    for (status, allowed) in [(0x0000_0008, false), (0x1000_0008, true)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(1024);
+
+        cpu.cp0_mut().write_reg(12, 0, status);
+
+        memory.write_word(0, encode_cp0(0, 8, 12, 0));
+
+        cpu.step(&mut memory);
+
+        if allowed {
+            assert_eq!(cpu.read_reg(8), status);
+            assert_eq!(cpu.read_pc(), 4);
+        } else {
+            assert_eq!(cpu.cp0().exception_code(), 11);
+            assert_eq!(cpu.read_pc(), 0x8000_0180);
+        }
+    }
+}
+
+#[test]
+fn user_rdhwr_access_denied() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+    cpu.write_reg(8, 0xDEAD_BEEF);
+
+    memory.write_word(0, encode_r(0x1F, 0, 8, 2, 0, 0x3B));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.read_reg(8), 0xDEAD_BEEF);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn user_rdhwr_access_enabled() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+    cpu.cp0_mut().write_hwrena(1 << 2);
+
+    memory.write_word(0, encode_r(0x1F, 0, 8, 2, 0, 0x3B));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 1);
+    assert_eq!(cpu.read_pc(), 4);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn user_kernel_user_transition() {
+    use crate::cp0::PrivilegeMode;
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    // User Mode
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+    // User Program
+    memory.write_word(0, 0x0000000C);
+    memory.write_word(4, i(9, 0, 8, 100));
+
+    // Exception Handler
+    memory.write_word(0x180, encode_cp0(0, 26, 14, 0));
+
+    memory.write_word(0x184, i(9, 26, 26, 4));
+
+    memory.write_word(0x188, encode_cp0(4, 26, 14, 0));
+
+    memory.write_word(0x18C, 0x42000018);
+
+    assert_eq!(cpu.cp0().privilege_mode(), PrivilegeMode::User);
+
+    // SYSCALL
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().privilege_mode(), PrivilegeMode::Kernel);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert!(cpu.cp0().exception_level());
+
+    // Exception Handler 실행
+    for _ in 0..4 {
+        cpu.step(&mut memory);
+    }
+
+    // ERET 이후 User Mode 복귀
+    assert_eq!(cpu.cp0().privilege_mode(), PrivilegeMode::User);
+
+    assert_eq!(cpu.read_pc(), 4);
+    assert!(!cpu.cp0().exception_level());
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(cpu.read_pc(), 8);
+}
+#[test]
+fn compare_register_transfer() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 11, 0),
+            encode_cp0(0, 9, 11, 0),
+            encode_cp0(0, 10, 12, 1),
+        ],
+        &[(8, 100)],
+    );
+
+    assert_eq!(cpu.read_reg(9), 100);
+    assert_eq!(cpu.cp0().read_compare(), 100);
+
+    assert_eq!(cpu.read_reg(10) >> 29, 7);
+
+    assert!(!cpu.cp0().timer_interrupt_pending());
+}
+
+#[test]
+fn timer_interrupt_pending() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_compare(3);
+
+    cp0.tick();
+    cp0.tick();
+
+    assert!(!cp0.timer_interrupt_pending());
+
+    cp0.tick();
+
+    assert_eq!(cp0.read_count(), 3);
+    assert!(cp0.timer_interrupt_pending());
+    assert_eq!(cp0.interrupt_pending(), 0x80);
+
+    cp0.tick();
+
+    assert_eq!(cp0.read_count(), 4);
+    assert!(cp0.timer_interrupt_pending());
+}
+
+#[test]
+fn compare_write_clears_interrupt() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_compare(1);
+    cp0.tick();
+
+    assert!(cp0.timer_interrupt_pending());
+
+    cp0.write_reg(13, 0, 0x100);
+    cp0.write_compare(10);
+
+    assert!(!cp0.timer_interrupt_pending());
+    assert_eq!(cp0.interrupt_pending(), 1);
+    assert_eq!(cp0.read_compare(), 10);
+}
+
+#[test]
+fn interrupt_acceptance_conditions() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_compare(1);
+    cp0.tick();
+
+    for (status, expected) in [
+        (0x0000, false),
+        (0x0001, false),
+        (0x8000, false),
+        (0x8001, true),
+        (0x8003, false),
+        (0x8005, false),
+        (0x4001, false),
+    ] {
+        cp0.write_reg(12, 0, status);
+
+        assert_eq!(cp0.interrupt_requested(), expected);
+
+        assert!(cp0.timer_interrupt_pending());
+    }
+}
+
+#[test]
+fn timer_interrupt_delivery() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_compare(2);
+    cpu.cp0_mut().write_reg(12, 0, 0x8001);
+
+    memory.write_word(0, i(9, 0, 8, 100));
+    memory.write_word(4, i(9, 0, 9, 200));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(cpu.read_pc(), 4);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().exception_code(), 0);
+    assert_eq!(cpu.cp0().read_epc(), 4);
+
+    assert_eq!(cpu.read_reg(9), 0);
+    assert!(cpu.cp0().exception_level());
+    assert!(cpu.cp0().timer_interrupt_pending());
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn dedicated_interrupt_vector() {
+    for (status, vector) in [(0x0000_8001, 0x8000_0200), (0x0040_8001, 0xBFC0_0400)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(1024);
+
+        cpu.cp0_mut().write_compare(1);
+        cpu.cp0_mut().write_reg(12, 0, status);
+        cpu.cp0_mut().write_reg(13, 0, 1 << 23);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.read_pc(), vector);
+        assert_eq!(cpu.read_next_pc(), vector + 4);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+        assert!(cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn software_interrupt_delivery() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x0101);
+    cpu.cp0_mut().write_reg(13, 0, 0x0100);
+
+    memory.write_word(0, i(9, 0, 8, 100));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().exception_code(), 0);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+
+    assert_eq!(cpu.read_reg(8), 0);
+    assert!(!cpu.cp0().timer_interrupt_pending());
+}
+
+#[test]
+fn interrupt_before_delay_slot() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_compare(2);
+    cpu.cp0_mut().write_reg(12, 0, 0x8001);
+
+    memory.write_word(0, i(4, 0, 0, 3));
+    memory.write_word(4, i(9, 0, 8, 100));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 4);
+    assert_eq!(cpu.read_next_pc(), 16);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert!(cpu.cp0().branch_delay());
+
+    assert_eq!(cpu.read_reg(8), 0);
+}
+
+#[test]
+fn timer_count_wraparound() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_reg(9, 0, u32::MAX);
+    cp0.write_compare(0);
+
+    cp0.tick();
+
+    assert_eq!(cp0.read_count(), 0);
+    assert!(cp0.timer_interrupt_pending());
+}
+
+#[test]
+fn complete_timer_interrupt_cycle() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_compare(2);
+    cpu.cp0_mut().write_reg(12, 0, 0x8001);
+
+    // Main Program
+    memory.write_word(0, i(9, 0, 8, 100));
+    memory.write_word(4, i(9, 0, 9, 200));
+
+    // Timer Interrupt Handler
+    memory.write_word(0x180, i(9, 0, 26, 100));
+
+    memory.write_word(0x184, encode_cp0(4, 26, 11, 0));
+
+    memory.write_word(0x188, 0x42000018);
+
+    // Main Program 실행
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+
+    // Timer Interrupt 발생
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().read_epc(), 4);
+    assert!(cpu.cp0().timer_interrupt_pending());
+
+    // Interrupt Handler 실행
+    for _ in 0..3 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_pc(), 4);
+    assert_eq!(cpu.cp0().read_compare(), 100);
+
+    assert!(!cpu.cp0().timer_interrupt_pending());
+    assert!(!cpu.cp0().exception_level());
+
+    // 중단된 명령어 실행
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(9), 200);
+    assert_eq!(cpu.read_pc(), 8);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn mmu_direct_mapping() {
+    use crate::cp0::PrivilegeMode::Kernel;
+    use crate::mmu::{AccessType, Mmu};
+
+    for (virtual_addr, physical_addr) in [
+        (0x8000_0000, 0),
+        (0xA000_0000, 0),
+        (0x8000_1234, 0x1234),
+        (0xA000_1234, 0x1234),
+        (0x9FFF_FFFF, 0x1FFF_FFFF),
+        (0xBFFF_FFFF, 0x1FFF_FFFF),
+    ] {
+        assert_eq!(
+            Mmu::translate(virtual_addr, Kernel, AccessType::Load,),
+            Ok(physical_addr)
+        );
+    }
+}
+
+#[test]
+fn mmu_segment_permissions() {
+    use crate::cp0::PrivilegeMode::*;
+    use crate::mmu::{AccessType, Mmu};
+
+    for (mode, address, allowed) in [
+        (Kernel, 0x8000_0000, true),
+        (Kernel, 0xE000_0000, true),
+        (Supervisor, 0x0000_1000, true),
+        (Supervisor, 0x8000_0000, false),
+        (Supervisor, 0xA000_0000, false),
+        (Supervisor, 0xC000_0000, true),
+        (Supervisor, 0xE000_0000, false),
+        (User, 0x7FFF_FFFF, true),
+        (User, 0x8000_0000, false),
+        (User, 0xA000_0000, false),
+        (User, 0xC000_0000, false),
+        (User, 0xE000_0000, false),
+    ] {
+        assert_eq!(
+            Mmu::translate(address, mode, AccessType::Load,).is_ok(),
+            allowed
+        );
+    }
+}
+
+#[test]
+fn user_kernel_fetch_denied() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+    cpu.write_pc(0x8000_0100);
+
+    memory.write_word(0x100, i(9, 0, 8, 100));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 4);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x8000_0100);
+
+    assert_eq!(cpu.cp0().read_epc(), 0x8000_0100);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.read_reg(8), 0);
+}
+
+#[test]
+fn user_kernel_load_denied() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+    cpu.write_reg(8, 0x8000_0100);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+
+    memory.write_word(0, i(0x23, 8, 9, 0));
+    memory.write_word(0x100, 100);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 4);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x8000_0100);
+
+    assert_eq!(cpu.read_reg(9), 0xDEAD_BEEF);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn user_kernel_store_denied() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+    cpu.write_reg(8, 0xA000_0100);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+    memory.write_word(0x100, 100);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 5);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0xA000_0100);
+
+    assert_eq!(memory.read_word(0x100), 100);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn kernel_segment_load_store() {
+    let cpu = run_kernel_alias_program();
+
+    assert_eq!(cpu.read_reg(10), 0xDEAD_BEEF);
+    assert!(!cpu.cp0().exception_level());
+}
+
+fn run_kernel_alias_program() -> Cpu {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_reg(8, 0x8000_0100);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+    cpu.write_reg(11, 0xA000_0100);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+    memory.write_word(4, i(0x23, 11, 10, 0));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_word(0x100), 0xDEAD_BEEF);
+
+    cpu
+}
+
+#[test]
+fn atomic_segment_alias() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_reg(8, 0x8000_0100);
+    cpu.write_reg(11, 0xA000_0100);
+
+    memory.write_word(0x100, 10);
+
+    memory.write_word(0, i(0x30, 8, 9, 0));
+    memory.write_word(4, i(9, 9, 9, 1));
+    memory.write_word(8, i(0x38, 11, 9, 0));
+
+    cpu.step(&mut memory);
+
+    assert!(cpu.check_reservation(0x100));
+    assert_eq!(cpu.read_reg(9), 10);
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_word(0x100), 11);
+    assert_eq!(cpu.read_reg(9), 1);
+    assert!(!cpu.check_reservation(0x100));
+}
+
+#[test]
+fn mmu_delay_slot_exception() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+
+    cpu.write_reg(8, 0x8000_0100);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+
+    memory.write_word(0, i(4, 0, 0, 3));
+    memory.write_word(4, i(0x23, 8, 9, 0));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 4);
+    assert!(cpu.cp0().branch_delay());
+    assert_eq!(cpu.cp0().read_epc(), 0);
+
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x8000_0100);
+
+    assert_eq!(cpu.read_reg(9), 0xDEAD_BEEF);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn tlb_register_initialization() {
+    use crate::cp0::{Cp0, TLB_SIZE};
+
+    let cp0 = Cp0::new();
+
+    assert_eq!(cp0.read_index(), 0);
+    assert_eq!(cp0.read_random(), (TLB_SIZE - 1) as u32);
+
+    assert_eq!(cp0.read_entry_lo0(), 0);
+    assert_eq!(cp0.read_entry_lo1(), 0);
+    assert_eq!(cp0.read_context(), 0);
+    assert_eq!(cp0.read_page_mask(), 0);
+    assert_eq!(cp0.read_wired(), 0);
+    assert_eq!(cp0.read_entry_hi(), 0);
+}
+
+#[test]
+fn tlb_register_transfer() {
+    for (rd, value) in [
+        (0, 15),
+        (2, 0x0000_0047),
+        (3, 0x0000_0087),
+        (4, 0x8000_0000),
+        (5, 0x0000_6000),
+        (6, 4),
+        (10, 0x0040_0001),
+    ] {
+        let cpu = run(
+            &[encode_cp0(4, 8, rd, 0), encode_cp0(0, 9, rd, 0)],
+            &[(8, value)],
+        );
+
+        assert_eq!(cpu.read_reg(9), value, "CP0 Register {rd}");
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn tlb_register_write_mask() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    for (rd, expected) in [
+        (0, 0x0000_001F),
+        (2, 0x03FF_FFFF),
+        (3, 0x03FF_FFFF),
+        (4, 0xFF80_0000),
+        (5, 0x1FFF_E000),
+        (6, 0x0000_001F),
+        (10, 0xFFFF_E0FF),
+    ] {
+        assert!(cp0.write_reg(rd, 0, u32::MAX));
+
+        assert_eq!(cp0.read_reg(rd, 0), Some(expected));
+    }
+}
+
+#[test]
+fn tlb_random_read_only() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    let old = cp0.read_random();
+
+    assert!(cp0.write_reg(1, 0, 5));
+    assert_eq!(cp0.read_random(), old);
+}
+
+#[test]
+fn tlb_random_cycle() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    for expected in (0..31u32).rev() {
+        cp0.tick();
+
+        assert_eq!(cp0.read_random(), expected);
+    }
+
+    assert_eq!(cp0.read_random(), 0);
+
+    cp0.tick();
+
+    assert_eq!(cp0.read_random(), 31);
+}
+
+#[test]
+fn tlb_wired_boundary() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_reg(6, 0, 28);
+
+    assert_eq!(cp0.read_wired(), 28);
+    assert_eq!(cp0.read_random(), 31);
+
+    for expected in [30, 29, 28, 31, 30] {
+        cp0.tick();
+
+        assert_eq!(cp0.read_random(), expected);
+    }
+
+    cp0.write_reg(6, 0, 31);
+
+    for _ in 0..10 {
+        cp0.tick();
+
+        assert_eq!(cp0.read_random(), 31);
+    }
+}
+
+#[test]
+fn tlb_asid_extraction() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_reg(10, 0, 0x0040_00AB);
+
+    assert_eq!(cp0.asid(), 0xAB);
+    assert_eq!(cp0.read_entry_hi(), 0x0040_00AB);
+}
+
+#[test]
+fn tlb_context_select_independence() {
+    let cpu = run(
+        &[
+            encode_cp0(4, 8, 4, 0),
+            encode_cp0(4, 9, 4, 2),
+            encode_cp0(0, 10, 4, 0),
+            encode_cp0(0, 11, 4, 2),
+        ],
+        &[(8, 0x8000_0000), (9, 0x1234_5678)],
+    );
+
+    assert_eq!(cpu.read_reg(10), 0x8000_0000);
+    assert_eq!(cpu.read_reg(11), 0x1234_5678);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn decode_tlb_instructions() {
+    use crate::decoder::decode;
+
+    for (word, mnemonic) in [
+        (0x42000001, "tlbr"),
+        (0x42000002, "tlbwi"),
+        (0x42000006, "tlbwr"),
+        (0x42000008, "tlbp"),
+    ] {
+        assert_eq!(decode(word).map(|inst| inst.mnemonic), Some(mnemonic));
+    }
+}
+
+#[test]
+fn tlb_initialization() {
+    use crate::cp0::TLB_SIZE;
+    use crate::tlb::Tlb;
+
+    let tlb = Tlb::new();
+
+    for index in 0..TLB_SIZE {
+        assert_eq!(tlb.read(index), None);
+    }
+
+    assert_eq!(tlb.probe(0, 0), None);
+}
+
+#[test]
+fn tlb_indexed_write() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(0, 0, 5);
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x0000_0046);
+    cpu.cp0_mut().write_reg(3, 0, 0x0000_0086);
+    cpu.cp0_mut().write_reg(5, 0, 0);
+
+    memory.write_word(0, 0x42000002);
+
+    cpu.step(&mut memory);
+
+    let entry = cpu.cp0().tlb().read(5).unwrap();
+
+    assert_eq!(entry.entry_hi, 0x0040_0001);
+    assert_eq!(entry.entry_lo0, 0x0000_0046);
+    assert_eq!(entry.entry_lo1, 0x0000_0086);
+    assert_eq!(entry.page_mask, 0);
+
+    assert_eq!(cpu.cp0().tlb().read(4), None);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn tlb_indexed_read() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(0, 0, 7);
+    cpu.cp0_mut().write_reg(10, 0, 0x0080_0002);
+    cpu.cp0_mut().write_reg(2, 0, 0x0000_00C6);
+    cpu.cp0_mut().write_reg(3, 0, 0x0000_0106);
+    cpu.cp0_mut().write_reg(5, 0, 0x6000);
+
+    memory.write_word(0, 0x42000002);
+    memory.write_word(4, 0x42000001);
+
+    // TLBWI
+    cpu.step(&mut memory);
+
+    // CP0 Register 초기화
+    cpu.cp0_mut().write_reg(10, 0, 0);
+    cpu.cp0_mut().write_reg(2, 0, 0);
+    cpu.cp0_mut().write_reg(3, 0, 0);
+    cpu.cp0_mut().write_reg(5, 0, 0);
+
+    // TLBR
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().read_entry_hi(), 0x0080_0002);
+    assert_eq!(cpu.cp0().read_entry_lo0(), 0x0000_00C6);
+    assert_eq!(cpu.cp0().read_entry_lo1(), 0x0000_0106);
+    assert_eq!(cpu.cp0().read_page_mask(), 0x6000);
+}
+
+#[test]
+fn tlb_probe_hit() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(0, 0, 9);
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0003);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().write_reg(3, 0, 0x86);
+
+    memory.write_word(0, 0x42000002);
+    memory.write_word(4, 0x42000008);
+
+    cpu.step(&mut memory);
+
+    cpu.cp0_mut().write_reg(0, 0, 0);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().read_index(), 9);
+    assert_eq!(cpu.cp0().read_index() >> 31, 0);
+}
+
+#[test]
+fn tlb_probe_asid_miss() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(0, 0, 5);
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().write_reg(3, 0, 0x86);
+
+    memory.write_word(0, 0x42000002);
+    memory.write_word(4, 0x42000008);
+    memory.write_word(8, 0x42000008);
+
+    cpu.step(&mut memory);
+
+    // VPN2는 동일하지만 ASID 불일치
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0002);
+
+    cpu.step(&mut memory);
+
+    assert_ne!(cpu.cp0().read_index() & 0x8000_0000, 0);
+
+    // ASID 복원
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().read_index(), 5);
+}
+
+#[test]
+fn tlb_global_mapping() {
+    use crate::tlb::TlbEntry;
+
+    let mut cpu = Cpu::new();
+
+    for (lo0, lo1, global) in [
+        (0x47, 0x87, true),
+        (0x47, 0x86, false),
+        (0x46, 0x87, false),
+        (0x46, 0x86, false),
+    ] {
+        cpu.cp0_mut().write_reg(0, 0, 0);
+        cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+        cpu.cp0_mut().write_reg(2, 0, lo0);
+        cpu.cp0_mut().write_reg(3, 0, lo1);
+
+        cpu.cp0_mut().tlb_write_indexed();
+
+        let entry: TlbEntry = cpu.cp0().tlb().read(0).unwrap();
+
+        assert_eq!(entry.global(), global);
+        assert_eq!(entry.matches(0x0040_0000, 2), global);
+
+        // 동일 ASID는 항상 일치
+        assert!(entry.matches(0x0040_0000, 1));
+    }
+}
+
+#[test]
+fn tlb_page_mask_probe() {
+    use crate::tlb::TlbEntry;
+
+    let entry = TlbEntry {
+        entry_hi: 0x0040_0001,
+        entry_lo0: 0x46,
+        entry_lo1: 0x86,
+        page_mask: 0x6000,
+    };
+
+    // 16 KiB Page 2개 = 32 KiB 범위
+    for address in [0x0040_0000, 0x0040_2000, 0x0040_4000, 0x0040_7FFF] {
+        assert!(entry.matches(address, 1));
+    }
+
+    assert!(!entry.matches(0x0040_8000, 1));
+    assert!(!entry.matches(0x0040_0000, 2));
+}
+
+#[test]
+fn tlb_random_write() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(6, 0, 28);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().write_reg(3, 0, 0x86);
+
+    memory.write_word(0, 0x42000006);
+
+    assert_eq!(cpu.cp0().read_random(), 31);
+
+    cpu.step(&mut memory);
+
+    // step()에서 Random이 먼저 감소
+    assert_eq!(cpu.cp0().read_random(), 30);
+
+    let entry = cpu.cp0().tlb().read(30).unwrap();
+
+    assert_eq!(entry.entry_hi, 0x0040_0001);
+
+    for index in 0..28 {
+        assert_eq!(cpu.cp0().tlb().read(index), None);
+    }
+}
+
+#[test]
+fn user_tlb_access_denied() {
+    for word in [0x42000001, 0x42000002, 0x42000006, 0x42000008] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(1024);
+
+        cpu.cp0_mut().write_reg(12, 0, 0x10);
+        cpu.cp0_mut().write_reg(0, 0, 5);
+
+        memory.write_word(0, word);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.read_pc(), 0x8000_0180);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+
+        assert_eq!(cpu.cp0().tlb().read(5), None);
+        assert_eq!(cpu.cp0().read_index(), 5);
+
+        assert!(cpu.cp0().is_kernel_mode());
+    }
 }

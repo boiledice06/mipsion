@@ -9,7 +9,28 @@ use crate::memory::Memory;
 use crate::alu::checked_compute;
 use crate::exception::Exception;
 
+use crate::mmu::AccessType;
+
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
+    // CP0 및 TLB 명령어 접근 권한 검사
+    if matches!(
+        operation,
+        Operation::Mfc0
+            | Operation::Mtc0
+            | Operation::Ei
+            | Operation::Di
+            | Operation::Eret
+            | Operation::Tlbr
+            | Operation::Tlbwi
+            | Operation::Tlbwr
+            | Operation::Tlbp
+    ) && !cpu.cp0().cp0_accessible()
+    {
+        cpu.raise_exception(Exception::CoprocessorUnusable, None);
+
+        return;
+    }
+
     match operation {
         Operation::Addu
         | Operation::Subu
@@ -236,6 +257,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             }
 
+            let Some(address) = cpu.translate_address(address, AccessType::Load) else {
+                return;
+            };
+
             let result = match operation {
                 Operation::Lw => memory.read_word(address),
                 Operation::Lh => memory.read_halfword(address) as i16 as i32 as u32,
@@ -270,6 +295,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             let value = cpu.read_reg(rt);
 
+            let Some(address) = cpu.translate_address(address, AccessType::Store) else {
+                return;
+            };
+
             match operation {
                 Operation::Sw => memory.write_word(address, value),
                 Operation::Sh => memory.write_halfword(address, value as u16),
@@ -287,6 +316,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let base = cpu.read_reg(rs);
             let offset = inst.immediate() as i16 as i32 as u32;
             let address = base.wrapping_add(offset);
+
+            let Some(address) = cpu.translate_address(address, AccessType::Load) else {
+                return;
+            };
 
             let value = cpu.read_reg(rt);
 
@@ -306,6 +339,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let base = cpu.read_reg(rs);
             let offset = inst.immediate() as i16 as i32 as u32;
             let address = base.wrapping_add(offset);
+
+            let Some(address) = cpu.translate_address(address, AccessType::Store) else {
+                return;
+            };
 
             let value = cpu.read_reg(rt);
 
@@ -343,8 +380,6 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             if matches!(operation, Operation::Jal) {
                 cpu.write_reg(31, cpu.read_next_pc());
             }
-
-            cpu.write_next_pc(target);
 
             cpu.write_next_pc(target);
             cpu.mark_delay_slot();
@@ -507,6 +542,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             }
 
+            let Some(address) = cpu.translate_address(address, AccessType::Load) else {
+                return;
+            };
+
             let value = memory.read_word(address);
 
             cpu.write_reg(rt, value);
@@ -526,6 +565,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 cpu.raise_exception(Exception::AddressErrorStore, Some(address));
                 return;
             }
+
+            let Some(address) = cpu.translate_address(address, AccessType::Store) else {
+                return;
+            };
 
             let value = cpu.read_reg(rt);
             let success = cpu.check_reservation(address);
@@ -551,6 +594,12 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let rt = inst.rt() as usize;
             let rd = inst.rd();
 
+            if !cpu.cp0().hardware_register_accessible(rd) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
             let value = match rd {
                 0 => 0,
                 1 => 0,
@@ -565,6 +614,62 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             };
 
             cpu.write_reg(rt, value);
+        }
+
+        Operation::Mfc0 => {
+            let rt = inst.rt() as usize;
+            let rd = inst.rd();
+            let sel = inst.sel();
+
+            match cpu.cp0().read_reg(rd, sel) {
+                Some(value) => cpu.write_reg(rt, value),
+
+                None => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                }
+            }
+        }
+
+        Operation::Mtc0 => {
+            let rt = inst.rt() as usize;
+            let rd = inst.rd();
+            let sel = inst.sel();
+
+            let value = cpu.read_reg(rt);
+
+            if !cpu.cp0_mut().write_reg(rd, sel, value) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+            }
+        }
+
+        Operation::Ei | Operation::Di => {
+            let rt = inst.rt() as usize;
+
+            let enabled = matches!(operation, Operation::Ei);
+
+            let old_status = cpu.cp0_mut().set_interrupt_enabled(enabled);
+
+            cpu.write_reg(rt, old_status);
+        }
+
+        Operation::Eret => {
+            cpu.return_from_exception();
+        }
+
+        Operation::Tlbr => {
+            cpu.cp0_mut().tlb_read();
+        }
+
+        Operation::Tlbwi => {
+            cpu.cp0_mut().tlb_write_indexed();
+        }
+
+        Operation::Tlbwr => {
+            cpu.cp0_mut().tlb_write_random();
+        }
+
+        Operation::Tlbp => {
+            cpu.cp0_mut().tlb_probe();
         }
         _ => todo!(
             "Instruction not implemented: opcode={:#04x}, funct={:#04x}",
