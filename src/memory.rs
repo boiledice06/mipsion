@@ -1,0 +1,48 @@
+pub struct Memory {
+    data: Vec<u8>,
+}
+
+impl Memory {
+    pub fn new(size: usize) -> Self {
+        Self {
+            data: vec![0; size],
+        }
+    }
+
+    pub fn read_byte(&self, address: u32) -> u8 {
+        self.data[address as usize]
+    }
+
+    pub fn write_byte(&mut self, address: u32, value: u8) {
+        self.data[address as usize] = value
+    }
+
+    pub fn read_halfword(&self, address: u32) -> u16 {
+        let low = self.data[address as usize];
+        let high = self.data[address as usize + 1];
+
+        (low as u16) | ((high as u16) << 8)
+    }
+
+    pub fn write_halfword(&mut self, address: u32, value: u16) {
+        let low = (value & 0xFF) as u8;
+        let high = (value >> 8) as u8;
+
+        self.write_byte(address, low);
+        self.write_byte(address + 1, high);
+    }
+
+    pub fn read_word(&self, address: u32) -> u32 {
+        let low = self.read_halfword(address);
+        let high = self.read_halfword(address + 2);
+
+        (low as u32) | ((high as u32) << 16)
+    }
+
+    pub fn write_word(&mut self, address: u32, value: u32) {
+        let low = (value & 0xFFFF) as u16;
+        let high = (value >> 16) as u16;
+        self.write_halfword(address, low);
+        self.write_halfword(address + 2, high);
+    }
+}
