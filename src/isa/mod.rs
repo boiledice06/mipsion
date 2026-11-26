@@ -7,15 +7,4 @@ pub struct InstructionDef {
     pub operation: Operation,
 }
 
-pub enum Operation {
-    Add,
-    Addu,
-    Addi,
-    Addiu,
-    Sub,
-    Subu,
-    And,
-    Or,
-    Xor,
-    Nor,
-}
+include!(concat!(env!("OUT_DIR"), "/operations.rs"));

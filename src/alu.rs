@@ -12,5 +12,11 @@ pub fn compute(a: u32, b: u32, operation: &Operation) -> u32 {
 
         Operation::Xor => a ^ b,
         Operation::Nor => !(a | b),
+
+        Operation::Slt => ((a as i32) < (b as i32)) as u32,
+        Operation::Sltu => (a < b) as u32,
+        Operation::Sll => a << b,
+        Operation::Srl => a >> b,
+        Operation::Sra => ((a as i32) >> b) as u32,
     }
 }
