@@ -7,9 +7,10 @@ use crate::instruction::RawInstruction;
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
     pc: u32,        // Program Counter
-    hi: u32,        // 곱셈 상위 32비트, 나눗셈 나머지
-    lo: u32,        // 곱셈 하위 32비트, 나눗셈 몫
-    halted: bool,   // 에뮬레이터 실행 중단 여부
+    next_pc: u32,
+    hi: u32,      // 곱셈 상위 32비트, 나눗셈 나머지
+    lo: u32,      // 곱셈 하위 32비트, 나눗셈 몫
+    halted: bool, // 에뮬레이터 실행 중단 여부
 }
 
 impl Cpu {
@@ -17,6 +18,7 @@ impl Cpu {
         Self {
             gpr: [0; 32],
             pc: 0x00000000,
+            next_pc: 4,
             hi: 0,
             lo: 0,
             halted: false,
@@ -35,7 +37,9 @@ impl Cpu {
 
     pub fn fetch(&mut self, memory: &Memory) -> u32 {
         let w = memory.read_word(self.pc);
-        self.pc += 4;
+        self.pc = self.next_pc;
+        self.next_pc = self.next_pc.wrapping_add(4);
+
         w
     }
 
@@ -72,5 +76,27 @@ impl Cpu {
     pub fn write_hilo(&mut self, value: u64) {
         self.hi = (value >> 32) as u32;
         self.lo = value as u32;
+    }
+
+    pub fn read_pc(&self) -> u32 {
+        self.pc
+    }
+
+    pub fn read_next_pc(&self) -> u32 {
+        self.next_pc
+    }
+
+    pub fn write_pc(&mut self, address: u32) {
+        self.pc = address;
+        self.next_pc = address.wrapping_add(4);
+    }
+
+    pub fn write_next_pc(&mut self, address: u32) {
+        self.next_pc = address;
+    }
+
+    pub fn skip_delay_slot(&mut self) {
+        self.pc = self.next_pc;
+        self.next_pc = self.next_pc.wrapping_add(4);
     }
 }

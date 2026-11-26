@@ -45,4 +45,60 @@ impl Memory {
         self.write_halfword(address, low);
         self.write_halfword(address + 2, high);
     }
+
+    pub fn read_word_left(&self, address: u32, value: u32) -> u32 {
+        let base = address & !3;
+        let offset = address & 3;
+        let mut result = value;
+
+        for i in 0..=offset {
+            let shift = (3 - offset + i) * 8;
+            let byte = self.read_byte(base + i) as u32;
+
+            result &= !(0xFFu32 << shift);
+            result |= byte << shift;
+        }
+
+        result
+    }
+
+    pub fn read_word_right(&self, address: u32, value: u32) -> u32 {
+        let base = address & !3;
+        let offset = address & 3;
+        let mut result = value;
+
+        for i in offset..4 {
+            let shift = (i - offset) * 8;
+            let byte = self.read_byte(base + i) as u32;
+
+            result &= !(0xFFu32 << shift);
+            result |= byte << shift;
+        }
+
+        result
+    }
+
+    pub fn write_word_left(&mut self, address: u32, value: u32) {
+        let base = address & !3;
+        let offset = address & 3;
+
+        for i in 0..=offset {
+            let shift = (3 - offset + i) * 8;
+            let byte = (value >> shift) as u8;
+
+            self.write_byte(base + i, byte);
+        }
+    }
+
+    pub fn write_word_right(&mut self, address: u32, value: u32) {
+        let base = address & !3;
+        let offset = address & 3;
+
+        for i in offset..4 {
+            let shift = (i - offset) * 8;
+            let byte = (value >> shift) as u8;
+
+            self.write_byte(base + i, byte);
+        }
+    }
 }
