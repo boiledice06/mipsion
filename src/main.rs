@@ -8,6 +8,9 @@ mod instruction;
 mod isa;
 mod memory;
 
+mod cp0;
+mod exception;
+
 #[cfg(test)]
 mod regression;
 #[cfg(test)]

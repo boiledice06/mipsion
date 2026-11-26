@@ -82,3 +82,14 @@ pub fn accumulate(a: u32, b: u32, acc: u64, signed: bool, subtract: bool) -> u64
         acc.wrapping_add(product)
     }
 }
+
+pub fn checked_compute(a: u32, b: u32, operation: &Operation) -> Option<u32> {
+    let a = a as i32;
+    let b = b as i32;
+
+    match operation {
+        Operation::Add | Operation::Addi => a.checked_add(b).map(|v| v as u32),
+        Operation::Sub => a.checked_sub(b).map(|v| v as u32),
+        _ => unreachable!(),
+    }
+}

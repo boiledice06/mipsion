@@ -6,11 +6,12 @@ use crate::alu::{accumulate, compute, divide, extract, insert, multiply};
 
 use crate::memory::Memory;
 
+use crate::alu::checked_compute;
+use crate::exception::Exception;
+
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     match operation {
-        Operation::Add
-        | Operation::Addu
-        | Operation::Sub
+        Operation::Addu
         | Operation::Subu
         | Operation::And
         | Operation::Or
@@ -31,7 +32,7 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.write_reg(rd, result);
         }
 
-        Operation::Addi | Operation::Addiu | Operation::Slti | Operation::Sltiu => {
+        Operation::Addiu | Operation::Slti | Operation::Sltiu => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
 
@@ -42,6 +43,22 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             cpu.write_reg(rt, result);
         }
+
+        Operation::Add | Operation::Sub | Operation::Addi => {
+            let a = cpu.read_reg(inst.rs() as usize);
+
+            let (b, dest) = if matches!(operation, Operation::Addi) {
+                (inst.immediate() as i16 as i32 as u32, inst.rt() as usize)
+            } else {
+                (cpu.read_reg(inst.rt() as usize), inst.rd() as usize)
+            };
+
+            match checked_compute(a, b, operation) {
+                Some(result) => cpu.write_reg(dest, result),
+                None => cpu.raise_exception(Exception::Overflow, None),
+            }
+        }
+
         Operation::Sll | Operation::Srl | Operation::Sra | Operation::Rotr => {
             let rt = inst.rt() as usize;
             let rd = inst.rd() as usize;
@@ -208,6 +225,17 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             let address = base.wrapping_add(offset);
 
+            let misaligned = match operation {
+                Operation::Lw => address & 3 != 0,
+                Operation::Lh | Operation::Lhu => address & 1 != 0,
+                _ => false,
+            };
+
+            if misaligned {
+                cpu.raise_exception(Exception::AddressErrorLoad, Some(address));
+                return;
+            }
+
             let result = match operation {
                 Operation::Lw => memory.read_word(address),
                 Operation::Lh => memory.read_halfword(address) as i16 as i32 as u32,
@@ -228,6 +256,18 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let offset = inst.immediate() as i16 as i32 as u32;
 
             let address = base.wrapping_add(offset);
+
+            let misaligned = match operation {
+                Operation::Sw => address & 3 != 0,
+                Operation::Sh => address & 1 != 0,
+                _ => false,
+            };
+
+            if misaligned {
+                cpu.raise_exception(Exception::AddressErrorStore, Some(address));
+                return;
+            }
+
             let value = cpu.read_reg(rt);
 
             match operation {
@@ -236,6 +276,8 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 Operation::Sb => memory.write_byte(address, value as u8),
                 _ => unreachable!(),
             }
+
+            cpu.clear_reservation();
         }
 
         Operation::Lwl | Operation::Lwr => {
@@ -272,6 +314,8 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 Operation::Swr => memory.write_word_right(address, value),
                 _ => unreachable!(),
             }
+
+            cpu.clear_reservation();
         }
 
         Operation::Movn | Operation::Movz => {
@@ -301,6 +345,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.write_next_pc(target);
+
+            cpu.write_next_pc(target);
+            cpu.mark_delay_slot();
         }
 
         Operation::Jr | Operation::Jalr => {
@@ -314,6 +361,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.write_next_pc(target);
+
+            cpu.write_next_pc(target);
+            cpu.mark_delay_slot();
         }
 
         Operation::Beq
@@ -379,9 +429,115 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 let target = cpu.read_pc().wrapping_add(offset as u32);
 
                 cpu.write_next_pc(target);
+                cpu.mark_delay_slot();
             } else if likely {
                 cpu.skip_delay_slot();
+            } else {
+                cpu.mark_delay_slot();
             }
+        }
+
+        Operation::Syscall => {
+            cpu.raise_exception(Exception::Syscall, None);
+        }
+
+        Operation::Break => {
+            cpu.raise_exception(Exception::Breakpoint, None);
+        }
+
+        Operation::Teq
+        | Operation::Tne
+        | Operation::Tge
+        | Operation::Tgeu
+        | Operation::Tlt
+        | Operation::Tltu
+        | Operation::Teqi
+        | Operation::Tnei
+        | Operation::Tgei
+        | Operation::Tgeiu
+        | Operation::Tlti
+        | Operation::Tltiu => {
+            let a = cpu.read_reg(inst.rs() as usize);
+
+            let immediate = matches!(
+                operation,
+                Operation::Teqi
+                    | Operation::Tnei
+                    | Operation::Tgei
+                    | Operation::Tgeiu
+                    | Operation::Tlti
+                    | Operation::Tltiu
+            );
+
+            let b = if immediate {
+                inst.immediate() as i16 as i32 as u32
+            } else {
+                cpu.read_reg(inst.rt() as usize)
+            };
+
+            let trap = match operation {
+                Operation::Teq | Operation::Teqi => a == b,
+                Operation::Tne | Operation::Tnei => a != b,
+
+                Operation::Tge | Operation::Tgei => (a as i32) >= (b as i32),
+
+                Operation::Tgeu | Operation::Tgeiu => a >= b,
+
+                Operation::Tlt | Operation::Tlti => (a as i32) < (b as i32),
+
+                Operation::Tltu | Operation::Tltiu => a < b,
+
+                _ => unreachable!(),
+            };
+
+            if trap {
+                cpu.raise_exception(Exception::Trap, None);
+            }
+        }
+
+        Operation::Ll => {
+            let rs = inst.rs() as usize;
+            let rt = inst.rt() as usize;
+
+            let base = cpu.read_reg(rs);
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = base.wrapping_add(offset);
+
+            if address & 3 != 0 {
+                cpu.raise_exception(Exception::AddressErrorLoad, Some(address));
+                return;
+            }
+
+            let value = memory.read_word(address);
+
+            cpu.write_reg(rt, value);
+            cpu.set_reservation(address);
+        }
+
+        Operation::Sc => {
+            let rs = inst.rs() as usize;
+            let rt = inst.rt() as usize;
+
+            let base = cpu.read_reg(rs);
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = base.wrapping_add(offset);
+
+            if address & 3 != 0 {
+                cpu.raise_exception(Exception::AddressErrorStore, Some(address));
+                return;
+            }
+
+            let value = cpu.read_reg(rt);
+            let success = cpu.check_reservation(address);
+
+            if success {
+                memory.write_word(address, value);
+            }
+
+            cpu.clear_reservation();
+            cpu.write_reg(rt, success as u32);
         }
         _ => todo!(
             "Instruction not implemented: opcode={:#04x}, funct={:#04x}",

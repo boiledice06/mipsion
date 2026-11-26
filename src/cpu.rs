@@ -4,6 +4,9 @@ use crate::decoder::decode;
 use crate::executor::execute;
 use crate::instruction::RawInstruction;
 
+use crate::cp0::Cp0;
+use crate::exception::Exception;
+
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
     pc: u32,        // Program Counter
@@ -11,6 +14,11 @@ pub struct Cpu {
     hi: u32,      // 곱셈 상위 32비트, 나눗셈 나머지
     lo: u32,      // 곱셈 하위 32비트, 나눗셈 몫
     halted: bool, // 에뮬레이터 실행 중단 여부
+    cp0: Cp0,
+    current_pc: u32,
+    in_delay_slot: bool,
+    next_delay_slot: bool,
+    reservation: Option<u32>,
 }
 
 impl Cpu {
@@ -22,6 +30,11 @@ impl Cpu {
             hi: 0,
             lo: 0,
             halted: false,
+            cp0: Cp0::new(),
+            current_pc: 0,
+            in_delay_slot: false,
+            next_delay_slot: false,
+            reservation: None,
         }
     }
 
@@ -36,21 +49,43 @@ impl Cpu {
     }
 
     pub fn fetch(&mut self, memory: &Memory) -> u32 {
-        let w = memory.read_word(self.pc);
+        self.current_pc = self.pc;
+
+        self.in_delay_slot = self.next_delay_slot;
+        self.next_delay_slot = false;
+
+        let word = memory.read_word(self.pc);
+
         self.pc = self.next_pc;
         self.next_pc = self.next_pc.wrapping_add(4);
 
-        w
+        word
     }
 
     pub fn step(&mut self, memory: &mut Memory) {
-        // Fetch -> RawInstruction -> Decode -> Execute
-        let w = self.fetch(memory);
-        let raw_inst = RawInstruction::new(w);
+        if self.halted {
+            return;
+        }
 
-        let decoded = decode(w).unwrap();
+        if self.pc & 3 != 0 {
+            self.current_pc = self.pc;
+            self.in_delay_slot = self.next_delay_slot;
 
-        execute(self, memory, &raw_inst, &decoded.operation);
+            self.raise_exception(Exception::AddressErrorLoad, Some(self.pc));
+            return;
+        }
+
+        let word = self.fetch(memory);
+        let raw_inst = RawInstruction::new(word);
+
+        match decode(word) {
+            Some(decoded) => {
+                execute(self, memory, &raw_inst, &decoded.operation);
+            }
+            None => {
+                self.raise_exception(Exception::ReservedInstruction, None);
+            }
+        }
     }
 
     pub fn read_hi(&self) -> u32 {
@@ -98,5 +133,40 @@ impl Cpu {
     pub fn skip_delay_slot(&mut self) {
         self.pc = self.next_pc;
         self.next_pc = self.next_pc.wrapping_add(4);
+    }
+
+    pub fn cp0(&self) -> &Cp0 {
+        &self.cp0
+    }
+
+    pub fn mark_delay_slot(&mut self) {
+        self.next_delay_slot = true;
+    }
+
+    pub fn raise_exception(&mut self, exception: Exception, bad_address: Option<u32>) {
+        self.cp0
+            .enter_exception(exception, self.current_pc, self.in_delay_slot, bad_address);
+
+        self.halted = true;
+        self.in_delay_slot = false;
+        self.next_delay_slot = false;
+
+        self.clear_reservation();
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
+    pub fn set_reservation(&mut self, address: u32) {
+        self.reservation = Some(address);
+    }
+
+    pub fn check_reservation(&self, address: u32) -> bool {
+        self.reservation == Some(address)
+    }
+
+    pub fn clear_reservation(&mut self) {
+        self.reservation = None;
     }
 }
