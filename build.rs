@@ -42,8 +42,8 @@ fn main() {
         }
 
         match *implementation {
-            "구현" | "부분" => encodings.push((mask, pattern, mnemonic)),
-            "대기" | "별칭" => {}
+            "구현" | "부분" | "대기" => encodings.push((mask, pattern, mnemonic)),
+            "별칭" => {}
             _ => panic!("Invalid implementation status: {line}"),
         }
     }

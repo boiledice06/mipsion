@@ -48,4 +48,29 @@ impl Cpu {
 
         execute(self, &raw_inst, &decoded.operation);
     }
+
+    pub fn read_hi(&self) -> u32 {
+        self.hi
+    }
+
+    pub fn read_lo(&self) -> u32 {
+        self.lo
+    }
+
+    pub fn write_hi(&mut self, value: u32) {
+        self.hi = value;
+    }
+
+    pub fn write_lo(&mut self, value: u32) {
+        self.lo = value;
+    }
+
+    pub fn read_hilo(&self) -> u64 {
+        ((self.hi as u64) << 32) | self.lo as u64
+    }
+
+    pub fn write_hilo(&mut self, value: u64) {
+        self.hi = (value >> 32) as u32;
+        self.lo = value as u32;
+    }
 }
