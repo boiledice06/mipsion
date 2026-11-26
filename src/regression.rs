@@ -1064,3 +1064,132 @@ fn store_conditional_without_ll() {
     assert_eq!(memory.read_word(256), 456);
     assert_eq!(cpu.read_reg(9), 0);
 }
+
+#[test]
+fn decode_synchronization() {
+    use crate::decoder::decode;
+
+    for (word, mnemonic) in [
+        (0x00000040, "ssnop"),
+        (0x000000C0, "ehb"),
+        (0x00000140, "pause"),
+        (0x0000000F, "sync"),
+        (0x051F0000, "synci"),
+        (0xCD000000, "pref"),
+        (0x01000408, "jr.hb"),
+        (0x01004C09, "jalr.hb"),
+    ] {
+        assert_eq!(
+            decode(word).map(|inst| inst.mnemonic),
+            Some(mnemonic),
+            "word: {word:#010x}"
+        );
+    }
+}
+
+#[test]
+fn synchronization_operations() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_reg(8, 256);
+    cpu.write_reg(9, 0xDEADBEEF);
+
+    memory.write_word(256, 0x12345678);
+
+    let words = [
+        0x00000040, // ssnop
+        0x000000C0, // ehb
+        0x00000140, // pause
+        0x0000000F, // sync
+        0x051F0000, // synci
+        0xCD000000, // pref
+    ];
+
+    for (index, word) in words.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..6 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_pc(), 24);
+    assert_eq!(cpu.read_reg(8), 256);
+    assert_eq!(cpu.read_reg(9), 0xDEADBEEF);
+    assert_eq!(memory.read_word(256), 0x12345678);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn hazard_barrier_jump() {
+    for (word, link) in [(0x01000408, false), (0x01004C09, true)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(1024);
+
+        cpu.write_reg(8, 32);
+        cpu.write_reg(9, 0xDEADBEEF);
+
+        memory.write_word(0, word);
+        memory.write_word(4, i(9, 0, 10, 100));
+        memory.write_word(32, i(9, 0, 11, 200));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.read_pc(), 4);
+        assert_eq!(cpu.read_next_pc(), 32);
+
+        assert_eq!(cpu.read_reg(9), if link { 8 } else { 0xDEADBEEF });
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.read_reg(10), 100);
+        assert_eq!(cpu.read_pc(), 32);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.read_reg(11), 200);
+        assert!(!cpu.is_halted());
+    }
+}
+
+#[test]
+fn hardware_register_read() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    let words = [
+        encode_r(0x1F, 0, 8, 0, 0, 0x3B),
+        encode_r(0x1F, 0, 9, 1, 0, 0x3B),
+        encode_r(0x1F, 0, 10, 2, 0, 0x3B),
+        encode_r(0x1F, 0, 11, 3, 0, 0x3B),
+        encode_r(0x1F, 0, 12, 29, 0, 0x3B),
+    ];
+
+    for (index, word) in words.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..5 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_reg(8), 0);
+    assert_eq!(cpu.read_reg(9), 0);
+    assert_eq!(cpu.read_reg(10), 3);
+    assert_eq!(cpu.read_reg(11), 1);
+    assert_eq!(cpu.read_reg(12), 0);
+
+    assert_eq!(cpu.cp0().read_count(), 5);
+    assert!(!cpu.is_halted());
+}
+
+#[test]
+fn invalid_hardware_register() {
+    let cpu = run(&[encode_r(0x1F, 0, 8, 15, 0, 0x3B)], &[(8, 0xDEADBEEF)]);
+
+    assert!(cpu.is_halted());
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert_eq!(cpu.read_reg(8), 0xDEADBEEF);
+}

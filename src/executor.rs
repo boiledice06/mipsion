@@ -350,17 +350,15 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.mark_delay_slot();
         }
 
-        Operation::Jr | Operation::Jalr => {
+        Operation::Jr | Operation::Jalr | Operation::JrHb | Operation::JalrHb => {
             let rs = inst.rs() as usize;
             let rd = inst.rd() as usize;
 
             let target = cpu.read_reg(rs);
 
-            if matches!(operation, Operation::Jalr) {
+            if matches!(operation, Operation::Jalr | Operation::JalrHb) {
                 cpu.write_reg(rd, cpu.read_next_pc());
             }
-
-            cpu.write_next_pc(target);
 
             cpu.write_next_pc(target);
             cpu.mark_delay_slot();
@@ -538,6 +536,35 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             cpu.clear_reservation();
             cpu.write_reg(rt, success as u32);
+        }
+
+        Operation::Ssnop
+        | Operation::Ehb
+        | Operation::Sync
+        | Operation::Synci
+        | Operation::Pref
+        | Operation::Pause => {
+            // 순차 실행 모델에서의 단순화
+        }
+
+        Operation::Rdhwr => {
+            let rt = inst.rt() as usize;
+            let rd = inst.rd();
+
+            let value = match rd {
+                0 => 0,
+                1 => 0,
+                2 => cpu.cp0().read_count(),
+                3 => 1,
+                29 => cpu.cp0().read_user_local(),
+
+                _ => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                    return;
+                }
+            };
+
+            cpu.write_reg(rt, value);
         }
         _ => todo!(
             "Instruction not implemented: opcode={:#04x}, funct={:#04x}",

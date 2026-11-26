@@ -67,6 +67,8 @@ impl Cpu {
             return;
         }
 
+        self.cp0.tick();
+
         if self.pc & 3 != 0 {
             self.current_pc = self.pc;
             self.in_delay_slot = self.next_delay_slot;

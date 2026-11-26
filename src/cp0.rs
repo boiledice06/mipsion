@@ -5,6 +5,9 @@ pub struct Cp0 {
     status: u32,
     cause: u32,
     epc: u32,
+    count: u32,
+    hwrena: u32,
+    user_local: u32,
 }
 
 impl Cp0 {
@@ -14,6 +17,9 @@ impl Cp0 {
             status: 0,
             cause: 0,
             epc: 0,
+            count: 0,
+            hwrena: 0,
+            user_local: 0,
         }
     }
 
@@ -74,5 +80,29 @@ impl Cp0 {
         if let Some(address) = bad_address {
             self.bad_vaddr = address;
         }
+    }
+
+    pub fn tick(&mut self) {
+        self.count = self.count.wrapping_add(1);
+    }
+
+    pub fn read_count(&self) -> u32 {
+        self.count
+    }
+
+    pub fn read_hwrena(&self) -> u32 {
+        self.hwrena
+    }
+
+    pub fn write_hwrena(&mut self, value: u32) {
+        self.hwrena = value & 0x2000000F;
+    }
+
+    pub fn read_user_local(&self) -> u32 {
+        self.user_local
+    }
+
+    pub fn write_user_local(&mut self, value: u32) {
+        self.user_local = value;
     }
 }

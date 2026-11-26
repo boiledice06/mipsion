@@ -8,15 +8,16 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-Early development — functional integer core.
+Early development — baseline integer core milestone.
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 80 / 291 (27.49%) |
-| Implemented (normal execution semantics) | 63 |
-| Partially implemented | 17 |
-| Pending | 211 |
-| Regression tests | 36 / 36 passing |
+| ISA entries with execution logic | 105 / 291 (36.08%) |
+| Mandatory CPU instruction execution paths | 105 / 105 |
+| Implemented (normal execution semantics) | 68 |
+| Partially implemented | 37 |
+| Pending | 186 |
+| Regression tests | 54 / 54 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -29,9 +30,10 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Conditional move
 - [x] Basic and unaligned load/store (normal paths)
 - [x] Integer branches and jumps, delay slots and branch-likely annul
-- [ ] Complete integer instruction set and exception semantics
-- [ ] Atomic LL/SC and synchronization
-- [ ] CP0, MMU and TLB
+- [x] Baseline execution paths for all mandatory CPU instructions
+- [x] Basic CP0 exception state, signed overflow and alignment checks
+- [x] Single-CPU LL/SC and simplified synchronization / RDHWR
+- [ ] Complete exception delivery, CP0 privilege model, MMU and TLB
 - [ ] Floating-point unit
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -52,6 +54,8 @@ The functional emulation core is designed independently of the user interface.
 - `decoder` — table-driven instruction identification
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
 - `executor` — instruction semantics and control flow
+- `cp0` — initial system register and exception state
+- `exception` — architectural exception codes
 - `test_helpers` / `regression` — instruction encoding and regression tests
 - `build.rs` — ISA table generation from the checklist
 
@@ -68,7 +72,7 @@ The current core is exercised through regression tests. A standalone program loa
 
 ## Current Limitations
 
-Signed overflow exceptions, memory alignment and access exceptions, delay-slot exception handling, CP0, virtual memory and floating-point instructions remain incomplete or unimplemented. The core is currently a functional instruction emulator, not a cycle-accurate pipeline simulator.
+Exceptions currently record CP0 state and halt rather than transfer to an exception vector. Memory bounds and virtual address translation, privilege checks, full synchronization semantics and floating-point instructions remain incomplete or unimplemented. The core is currently a functional instruction emulator, not a cycle-accurate pipeline simulator.
 
 ## Goals
 
