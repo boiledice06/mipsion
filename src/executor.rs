@@ -486,6 +486,22 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.clear_reservation();
         }
 
+        Operation::Movf | Operation::Movt => {
+            let rs = inst.rs() as usize;
+            let rd = inst.rd() as usize;
+            let cc = inst.branch_cc();
+
+            let condition = cpu.cp1().read_fcc(cc);
+
+            let expected = matches!(operation, Operation::Movt);
+
+            if condition == expected {
+                let value = cpu.read_reg(rs);
+
+                cpu.write_reg(rd, value);
+            }
+        }
+
         Operation::Movn | Operation::Movz => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
@@ -590,6 +606,31 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             if taken {
                 let offset = (inst.immediate() as i16 as i32) << 2;
+                let target = cpu.read_pc().wrapping_add(offset as u32);
+
+                cpu.write_next_pc(target);
+                cpu.mark_delay_slot();
+            } else if likely {
+                cpu.skip_delay_slot();
+            } else {
+                cpu.mark_delay_slot();
+            }
+        }
+
+        Operation::Bc1f | Operation::Bc1t | Operation::Bc1fl | Operation::Bc1tl => {
+            let cc = inst.branch_cc();
+
+            let condition = cpu.cp1().read_fcc(cc);
+
+            let expected = matches!(operation, Operation::Bc1t | Operation::Bc1tl);
+
+            let taken = condition == expected;
+
+            let likely = matches!(operation, Operation::Bc1fl | Operation::Bc1tl);
+
+            if taken {
+                let offset = (inst.immediate() as i16 as i32) << 2;
+
                 let target = cpu.read_pc().wrapping_add(offset as u32);
 
                 cpu.write_next_pc(target);
@@ -1075,6 +1116,55 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.cp1_mut().write_fcc(cc, result.condition);
+        }
+
+        Operation::MovfS
+        | Operation::MovtS
+        | Operation::MovfD
+        | Operation::MovtD
+        | Operation::MovnS
+        | Operation::MovzS
+        | Operation::MovnD
+        | Operation::MovzD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let double = inst.fmt() == 0x11;
+
+            if double
+                && (!cpu.cp1().valid_double_register(fs) || !cpu.cp1().valid_double_register(fd))
+            {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let should_move = match operation {
+                Operation::MovfS | Operation::MovfD => !cpu.cp1().read_fcc(inst.branch_cc()),
+
+                Operation::MovtS | Operation::MovtD => cpu.cp1().read_fcc(inst.branch_cc()),
+
+                Operation::MovnS | Operation::MovnD => cpu.read_reg(inst.rt() as usize) != 0,
+
+                Operation::MovzS | Operation::MovzD => cpu.read_reg(inst.rt() as usize) == 0,
+
+                _ => unreachable!(),
+            };
+
+            if should_move {
+                if double {
+                    let value = cpu
+                        .cp1()
+                        .read_doubleword(fs)
+                        .expect("validated source register");
+
+                    cpu.cp1_mut().write_doubleword(fd, value);
+                } else {
+                    let value = cpu.cp1().read_word(fs);
+
+                    cpu.cp1_mut().write_word(fd, value);
+                }
+            }
         }
 
         Operation::Cfc1 => {

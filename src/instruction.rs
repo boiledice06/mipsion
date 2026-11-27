@@ -47,6 +47,10 @@ impl RawInstruction {
         self.extract(8, 3) as u8
     }
 
+    pub fn branch_cc(&self) -> u8 {
+        self.extract(18, 3) as u8
+    }
+
     pub fn compare_cond(&self) -> u8 {
         self.extract(0, 4) as u8
     }

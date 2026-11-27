@@ -26,12 +26,13 @@ v0.3.0 (in development) — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 186 / 291 (63.92%) |
+| ISA entries with execution logic | 200 / 291 (68.73%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
+| Basic FPU instruction execution paths | 86 / 86 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 118 |
-| Pending | 105 |
-| Regression tests | 308 / 308 passing |
+| Partially implemented | 132 |
+| Pending | 91 |
+| Regression tests | 322 / 322 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -70,7 +71,10 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] All 32 single/double comparison instructions
 - [x] FCC0–7 condition code access
 - [x] Legacy NaN classification for comparisons
-- [ ] Floating-point unit
+- [x] Floating-point conditional branches
+- [x] Floating-point conditional moves
+- [x] Execution paths for all 86 basic FPU instructions
+- [ ] Full floating-point conformance
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
 - [ ] Five-stage pipeline simulation
@@ -121,7 +125,8 @@ The current core is exercised through regression tests. A standalone program loa
 - FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers, basic single- and double-precision arithmetic, and S/D/W format conversions.
 - FCSR rounding and Invalid/Inexact exception handling are implemented for CVT.W and explicit word rounding instructions.
 - Comparisons support legacy NaN classification and Invalid Operation handling.
-- Floating-point conditional branches, conditional moves and full IEEE 754 conformance remain incomplete.
+- All 86 basic FPU instructions have execution paths.
+- Full FCSR rounding, arithmetic exception semantics, subnormal handling and IEEE 754 conformance remain incomplete.
 - CP1 feature advertisement and full exception conformance remain incomplete.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.
