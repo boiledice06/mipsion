@@ -117,3 +117,9 @@ impl Tlb {
         entry.translate(address, store)
     }
 }
+
+impl Default for Tlb {
+    fn default() -> Self {
+        Self::new()
+    }
+}

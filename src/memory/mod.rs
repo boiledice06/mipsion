@@ -1,3 +1,6 @@
+pub mod mmu;
+pub mod tlb;
+
 pub struct Memory {
     data: Vec<u8>,
 }

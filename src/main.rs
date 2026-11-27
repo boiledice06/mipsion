@@ -1,33 +1,4 @@
-#![allow(dead_code)]
-
-mod alu;
-mod cpu;
-mod decoder;
-mod executor;
-mod fpu;
-mod instruction;
-mod isa;
-mod loader;
-mod memory;
-mod mmu;
-mod runtime;
-mod tlb;
-
-mod elf;
-
-mod cli;
-mod trace;
-
-mod cp0;
-mod cp1;
-mod exception;
-
-mod inspection;
-
-#[cfg(test)]
-mod regression;
-#[cfg(test)]
-mod test_helpers;
+use mipsion::{cli, cpu, elf, inspection, loader, memory, runtime, trace};
 
 fn main() -> std::process::ExitCode {
     use cli::{CliAction, parse_args};

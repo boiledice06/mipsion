@@ -1,3 +1,6 @@
+pub mod inspection;
+pub mod trace;
+
 use crate::cpu::Cpu;
 use crate::memory::Memory;
 use crate::trace::{CpuSnapshot, TraceEvent};

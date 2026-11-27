@@ -224,3 +224,9 @@ impl Cp1 {
         trap
     }
 }
+
+impl Default for Cp1 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
