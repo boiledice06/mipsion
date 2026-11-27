@@ -1,4 +1,12 @@
-# MIPSion
+
+<p align="center">
+  <img src="assets/logo.png" alt="MIPSion" width="480">
+</p>
+
+<h3 align="center">
+  A MIPS32 Release 2 Emulator Written in Rust
+</h3>
+
 
 A MIPS32 Release 2 emulator written in Rust.
 
