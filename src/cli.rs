@@ -42,6 +42,8 @@ Options:
     --dump-memory <addr> <size>
                                Display physical memory contents
     --trace                    Trace instruction execution
+    --load-address <addr>      Raw binary load address
+    --entry <addr>             Raw binary entry point
 
 Numbers may be decimal or hexadecimal (0x prefix).
 ";

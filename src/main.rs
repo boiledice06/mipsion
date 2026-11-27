@@ -13,6 +13,8 @@ mod mmu;
 mod runtime;
 mod tlb;
 
+mod elf;
+
 mod cli;
 mod trace;
 
@@ -88,17 +90,39 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
         return Err("memory dump range is out of bounds".into());
     }
 
-    load_raw(&mut memory, config.load_address, &bytes)
-        .map_err(|error| format!("failed to load program: {error:?}"))?;
+    let is_elf = bytes.starts_with(b"\x7FELF");
 
-    cpu.write_pc(config.entry);
+    let (entry, format) = if is_elf {
+        let result = elf::load_elf(&mut memory, &bytes)
+            .map_err(|error| format!("failed to load ELF: {error:?}"))?;
+
+        cpu.write_reg(29, result.stack_pointer);
+
+        (result.entry, "ELF32")
+    } else {
+        load_raw(&mut memory, config.load_address, &bytes)
+            .map_err(|error| format!("failed to load program: {error:?}"))?;
+
+        (config.entry, "Raw Binary")
+    };
+
+    cpu.write_pc(entry);
 
     println!("MIPSion {}", env!("CARGO_PKG_VERSION"));
     println!("Program:      {}", config.program.display());
     println!("Program size: {} bytes", bytes.len());
     println!("Memory size:  {} bytes", config.memory_size);
-    println!("Load address: {:#010X}", config.load_address);
-    println!("Entry point:  {:#010X}", config.entry);
+    println!("Format:       {format}");
+
+    if !is_elf {
+        println!("Load address: {:#010X}", config.load_address);
+    }
+
+    println!("Entry point:  {entry:#010X}");
+
+    if is_elf {
+        println!("Stack:        {:#010X}", cpu.read_reg(29));
+    }
 
     let execution_config = ExecutionConfig {
         max_steps: config.max_steps,
