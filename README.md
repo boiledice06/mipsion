@@ -110,29 +110,25 @@ See [ISA_CHECKLIST.md](ISA_CHECKLIST.md) for instruction-level implementation an
 
 ## Architecture
 
-The functional emulation core is designed independently of the user interface.
+MIPSion separates the reusable emulation library from the command-line interface.
 
-- `cpu` — CPU state, register file, PC/next-PC and execution cycle
-- `memory` — byte-addressable memory and aligned/unaligned access operations
-- `instruction` — raw instruction and bit-field extraction
-- `isa` — instruction definitions and operation types generated at build time
-- `decoder` — table-driven instruction identification
-- `alu` — arithmetic, logical, bit-field and HI/LO computations
-- `fpu` — floating-point arithmetic, format conversion, rounding, comparison and exception results
-- `executor` — instruction semantics and control flow
-- `cp0` — system registers, privilege, exceptions and interrupts
-- `cp1` — floating-point registers, control registers and data transfers
-- `mmu` — address translation and segment permissions
-- `tlb` — software-managed translation lookaside buffer
-- `exception` — architectural exception codes
-- `test_helpers` / `regression` — instruction encoding and regression tests
-- `loader` — validated raw binary loading
-- `elf` — ELF32 executable parsing and segment loading
-- `runtime` — bounded execution and exception reporting
-- `cli` — command-line configuration
-- `inspection` — register and physical memory dumps
-- `trace` — structured instruction execution events
-- `build.rs` — ISA table generation from the checklist
+| Module | Responsibility |
+| --- | --- |
+| `cpu/` | CPU state, ALU, instruction execution, CP0, CP1 and FPU |
+| `memory/` | Physical memory, MMU and TLB |
+| `isa/` | Instruction definitions, decoding and field extraction |
+| `loader/` | Raw binary and ELF32 executable loading |
+| `runtime/` | Execution control, tracing and state inspection |
+| `cli/` | Command-line argument parsing |
+| `tests/` | Domain-specific regression tests and shared helpers |
+| `lib.rs` | Reusable emulator library |
+| `main.rs` | Command-line application entry point |
+| `build.rs` | Build-time ISA table generation |
+
+The emulation library is independent of the application entry point,
+allowing future debugger and graphical interfaces to reuse the same core.
+
+Regression tests are organized by architectural domain.
 
 ## Getting Started
 
