@@ -16,6 +16,8 @@ pub enum Exception {
     Trap,
     FloatingPoint,
     MachineCheck,
+    InstructionBusError,
+    DataBusError,
 }
 
 impl Exception {
@@ -35,6 +37,8 @@ impl Exception {
             Self::Trap => 13,
             Self::FloatingPoint => 15,
             Self::MachineCheck => 24,
+            Self::InstructionBusError => 6,
+            Self::DataBusError => 7,
         }
     }
 

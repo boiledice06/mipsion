@@ -277,6 +277,17 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             };
 
+            let size = match operation {
+                Operation::Lw => 4,
+                Operation::Lh | Operation::Lhu => 2,
+                Operation::Lb | Operation::Lbu => 1,
+                _ => unreachable!(),
+            };
+
+            if !cpu.check_memory_access(memory, address, size, AccessType::Load) {
+                return;
+            }
+
             let result = match operation {
                 Operation::Lw => memory.read_word(address),
                 Operation::Lh => memory.read_halfword(address) as i16 as i32 as u32,
@@ -314,6 +325,17 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let Some(address) = cpu.translate_address(address, AccessType::Store) else {
                 return;
             };
+
+            let size = match operation {
+                Operation::Sw => 4,
+                Operation::Sh => 2,
+                Operation::Sb => 1,
+                _ => unreachable!(),
+            };
+
+            if !cpu.check_memory_access(memory, address, size, AccessType::Store) {
+                return;
+            }
 
             match operation {
                 Operation::Sw => memory.write_word(address, value),
@@ -358,6 +380,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let Some(physical_address) = cpu.translate_address(address, access) else {
                 return;
             };
+
+            if !cpu.check_memory_access(memory, physical_address, 4, access) {
+                return;
+            }
 
             match operation {
                 Operation::Lwc1 => {
@@ -418,6 +444,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             };
 
+            if !cpu.check_memory_access(memory, physical_address, 8, access) {
+                return;
+            }
+
             match operation {
                 Operation::Ldc1 => {
                     let value = memory.read_doubleword(physical_address);
@@ -452,6 +482,18 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             };
 
+            let offset = address & 3;
+
+            let (start, size) = match operation {
+                Operation::Lwl => (address & !3, (offset + 1) as usize),
+                Operation::Lwr => (address, (4 - offset) as usize),
+                _ => unreachable!(),
+            };
+
+            if !cpu.check_memory_access(memory, start, size, AccessType::Load) {
+                return;
+            }
+
             let value = cpu.read_reg(rt);
 
             let result = match operation {
@@ -474,6 +516,18 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let Some(address) = cpu.translate_address(address, AccessType::Store) else {
                 return;
             };
+
+            let offset = address & 3;
+
+            let (start, size) = match operation {
+                Operation::Swl => (address & !3, (offset + 1) as usize),
+                Operation::Swr => (address, (4 - offset) as usize),
+                _ => unreachable!(),
+            };
+
+            if !cpu.check_memory_access(memory, start, size, AccessType::Store) {
+                return;
+            }
 
             let value = cpu.read_reg(rt);
 
@@ -718,6 +772,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 return;
             };
 
+            if !cpu.check_memory_access(memory, address, 4, AccessType::Load) {
+                return;
+            }
+
             let value = memory.read_word(address);
 
             cpu.write_reg(rt, value);
@@ -741,6 +799,10 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let Some(address) = cpu.translate_address(address, AccessType::Store) else {
                 return;
             };
+
+            if !cpu.check_memory_access(memory, address, 4, AccessType::Store) {
+                return;
+            }
 
             let value = cpu.read_reg(rt);
             let success = cpu.check_reservation(address);

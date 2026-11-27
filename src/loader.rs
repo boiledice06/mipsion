@@ -18,7 +18,7 @@ pub fn load_raw(memory: &mut Memory, address: u32, bytes: &[u8]) -> Result<(), L
         return Err(LoadError::UnalignedAddress);
     }
 
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(LoadError::InvalidProgramSize);
     }
 

@@ -63,6 +63,10 @@ impl Cpu {
 
         let address = self.translate_address(self.pc, AccessType::Fetch)?;
 
+        if !self.check_memory_access(memory, address, 4, AccessType::Fetch) {
+            return None;
+        }
+
         let word = memory.read_word(address);
 
         self.pc = self.next_pc;
@@ -245,5 +249,26 @@ impl Cpu {
         let mut cpu = Self::new();
         cpu.translation_mode = TranslationMode::Tlb;
         cpu
+    }
+
+    pub fn check_memory_access(
+        &mut self,
+        memory: &Memory,
+        address: u32,
+        size: usize,
+        access: AccessType,
+    ) -> bool {
+        if memory.contains_range(address, size) {
+            return true;
+        }
+
+        let exception = match access {
+            AccessType::Fetch => Exception::InstructionBusError,
+            AccessType::Load | AccessType::Store => Exception::DataBusError,
+        };
+
+        self.raise_exception(exception, None);
+
+        false
     }
 }
