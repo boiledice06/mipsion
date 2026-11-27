@@ -22,16 +22,16 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-Early development — baseline integer core milestone.
+v0.2.0 — System Control Core
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 105 / 291 (36.08%) |
+| ISA entries with execution logic | 114 / 291 (39.18%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 37 |
-| Pending | 186 |
-| Regression tests | 54 / 54 passing |
+| Partially implemented | 46 |
+| Pending | 177 |
+| Regression tests | 145 / 145 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -47,7 +47,16 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Baseline execution paths for all mandatory CPU instructions
 - [x] Basic CP0 exception state, signed overflow and alignment checks
 - [x] Single-CPU LL/SC and simplified synchronization / RDHWR
-- [ ] Complete exception delivery, CP0 privilege model, MMU and TLB
+- [x] CP0 system register access
+- [x] Exception vector delivery and ERET
+- [x] Kernel, supervisor and user privilege modes
+- [x] Timer and software interrupts
+- [x] MMU and segment permission checks
+- [x] 32-entry software-managed TLB
+- [x] TLB translation and variable page sizes
+- [x] TLB refill, invalid and modified exceptions
+- [x] CPU configuration registers
+- [ ] Full system-control conformance
 - [ ] Floating-point unit
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -68,7 +77,9 @@ The functional emulation core is designed independently of the user interface.
 - `decoder` — table-driven instruction identification
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
 - `executor` — instruction semantics and control flow
-- `cp0` — initial system register and exception state
+- `cp0` — system registers, privilege, exceptions and interrupts
+- `mmu` — address translation and segment permissions
+- `tlb` — software-managed translation lookaside buffer
 - `exception` — architectural exception codes
 - `test_helpers` / `regression` — instruction encoding and regression tests
 - `build.rs` — ISA table generation from the checklist
@@ -86,7 +97,14 @@ The current core is exercised through regression tests. A standalone program loa
 
 ## Current Limitations
 
-Exceptions currently record CP0 state and halt rather than transfer to an exception vector. Memory bounds and virtual address translation, privilege checks, full synchronization semantics and floating-point instructions remain incomplete or unimplemented. The core is currently a functional instruction emulator, not a cycle-accurate pipeline simulator.
+- Functional instruction emulation, not cycle-accurate simulation.
+- Bare translation mode remains the default for compatibility.
+- TLB-backed translation is available through the TLB execution mode.
+- Physical memory bounds and bus errors remain incomplete.
+- CP0, TLB and exception behavior cover a limited architecture profile.
+- Cache behavior, execution hazards and full synchronization semantics are incomplete.
+- Floating-point instructions and optional coprocessors are not implemented.
+- Standalone program loading and graphical interfaces are not yet available.
 
 ## Goals
 

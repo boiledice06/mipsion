@@ -2712,3 +2712,407 @@ fn user_tlb_access_denied() {
         assert!(cpu.cp0().is_kernel_mode());
     }
 }
+
+#[test]
+fn tlb_translate_even_odd() {
+    use crate::tlb::TlbEntry;
+
+    let entry = TlbEntry {
+        entry_hi: 0x0040_0001,
+        entry_lo0: (0x10 << 6) | 6,
+        entry_lo1: (0x30 << 6) | 6,
+        page_mask: 0,
+    };
+
+    assert_eq!(entry.translate(0x0040_0123, false), Ok(0x0001_0123));
+
+    assert_eq!(entry.translate(0x0040_1456, false), Ok(0x0003_0456));
+}
+
+#[test]
+fn tlb_translate_large_page() {
+    use crate::tlb::TlbEntry;
+
+    let entry = TlbEntry {
+        entry_hi: 0x0040_0001,
+        entry_lo0: (0x13 << 6) | 6,
+        entry_lo1: (0x33 << 6) | 6,
+        page_mask: 0x6000,
+    };
+
+    assert_eq!(entry.page_size(), Ok(16384));
+
+    assert_eq!(entry.translate(0x0040_2345, false), Ok(0x0001_2345));
+
+    assert_eq!(entry.translate(0x0040_4567, false), Ok(0x0003_0567));
+}
+
+#[test]
+fn tlb_translate_miss() {
+    use crate::tlb::{Tlb, TlbEntry, TlbFault};
+
+    let mut tlb = Tlb::new();
+
+    tlb.write(
+        0,
+        TlbEntry {
+            entry_hi: 0x0040_0001,
+            entry_lo0: 0x46,
+            entry_lo1: 0x86,
+            page_mask: 0,
+        },
+    );
+
+    assert_eq!(tlb.translate(0x0040_0123, 1, false), Ok(0x1123));
+
+    assert_eq!(tlb.translate(0x0040_0123, 2, false), Err(TlbFault::Miss));
+
+    assert_eq!(tlb.translate(0x0080_0000, 1, false), Err(TlbFault::Miss));
+}
+
+#[test]
+fn tlb_translate_invalid() {
+    use crate::tlb::{TlbEntry, TlbFault};
+
+    let entry = TlbEntry {
+        entry_hi: 0x0040_0001,
+        entry_lo0: 0x44,
+        entry_lo1: 0x86,
+        page_mask: 0,
+    };
+
+    assert_eq!(entry.translate(0x0040_0000, false), Err(TlbFault::Invalid));
+
+    assert_eq!(entry.translate(0x0040_0000, true), Err(TlbFault::Invalid));
+
+    assert_eq!(entry.translate(0x0040_1000, false), Ok(0x2000));
+}
+
+#[test]
+fn tlb_translate_modified() {
+    use crate::tlb::{TlbEntry, TlbFault};
+
+    let entry = TlbEntry {
+        entry_hi: 0x0040_0001,
+        entry_lo0: 0x42,
+        entry_lo1: 0x86,
+        page_mask: 0,
+    };
+
+    // Read-only Page
+    assert_eq!(entry.translate(0x0040_0000, false), Ok(0x1000));
+
+    assert_eq!(entry.translate(0x0040_0000, true), Err(TlbFault::Modified));
+
+    // Writable Page
+    assert_eq!(entry.translate(0x0040_1000, true), Ok(0x2000));
+}
+
+#[test]
+fn tlb_invalid_page_mask() {
+    use crate::tlb::{TlbEntry, TlbFault};
+
+    let entry = TlbEntry {
+        entry_hi: 0,
+        entry_lo0: 0x46,
+        entry_lo1: 0x86,
+        page_mask: 0x2000,
+    };
+
+    assert_eq!(entry.page_size(), Err(TlbFault::InvalidPageMask));
+
+    assert_eq!(entry.translate(0, false), Err(TlbFault::InvalidPageMask));
+}
+
+#[test]
+fn tlb_mapped_instruction_fetch() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(8192);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().write_reg(3, 0, 0);
+    cpu.cp0_mut().tlb_write_indexed();
+
+    cpu.write_pc(0x0040_0000);
+
+    memory.write_word(0x1000, i(9, 0, 8, 100));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(cpu.read_pc(), 0x0040_0004);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn tlb_mapped_load_store() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(8192);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().tlb_write_indexed();
+
+    cpu.write_pc(0x8000_0000);
+
+    cpu.write_reg(8, 0x0040_0100);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+    memory.write_word(4, i(0x23, 8, 10, 0));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_word(0x1100), 0xDEAD_BEEF);
+
+    assert_eq!(cpu.read_reg(10), 0xDEAD_BEEF);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn tlb_refill_exception() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(1024);
+
+    let address = 0x0040_1234;
+
+    cpu.cp0_mut().write_reg(10, 0, 0xAB);
+    cpu.cp0_mut().write_reg(4, 0, 0x8000_0000);
+
+    cpu.write_pc(address);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 2);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), address);
+    assert_eq!(cpu.cp0().read_epc(), address);
+
+    assert_eq!(cpu.cp0().read_entry_hi(), 0x0040_00AB);
+
+    assert_eq!(cpu.cp0().read_context(), 0x8000_2000);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0000);
+    assert!(cpu.cp0().exception_level());
+}
+
+#[test]
+fn nested_tlb_refill_exception() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(14, 0, 0x1234);
+    cpu.cp0_mut().write_reg(12, 0, 2);
+
+    cpu.write_pc(0x0040_0000);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 2);
+    assert_eq!(cpu.cp0().read_epc(), 0x1234);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn tlb_invalid_exception() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(1024);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x44);
+    cpu.cp0_mut().tlb_write_indexed();
+
+    cpu.write_pc(0x0040_0000);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 2);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x0040_0000);
+}
+
+#[test]
+fn tlb_modified_exception() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(8192);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x42);
+    cpu.cp0_mut().tlb_write_indexed();
+
+    cpu.write_pc(0x8000_0000);
+
+    cpu.write_reg(8, 0x0040_0000);
+    cpu.write_reg(9, 0xDEAD_BEEF);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+    memory.write_word(0x1000, 123);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 1);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().read_epc(), 0x8000_0000);
+
+    assert_eq!(memory.read_word(0x1000), 123);
+}
+
+#[test]
+fn tlb_store_refill_exception() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(1024);
+
+    cpu.write_pc(0x8000_0000);
+
+    cpu.write_reg(8, 0x0040_0000);
+    cpu.write_reg(9, 100);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 3);
+
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x0040_0000);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0000);
+    assert_eq!(memory.read_word(0x100), 0);
+    assert!(cpu.cp0().exception_level());
+}
+
+#[test]
+fn complete_tlb_refill_cycle() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(8192);
+
+    // User Mode
+    cpu.cp0_mut().write_reg(12, 0, 0x10);
+    cpu.write_pc(0x0040_0000);
+
+    // User Program
+    memory.write_word(0x1000, i(9, 0, 8, 100));
+
+    // TLB Refill Handler
+    memory.write_word(0x00, i(9, 0, 26, 0x46));
+    memory.write_word(0x04, encode_cp0(4, 26, 2, 0));
+    memory.write_word(0x08, 0x42000002); // TLBWI
+    memory.write_word(0x0C, 0x42000018); // ERET
+
+    // TLB Miss
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_pc(), 0x8000_0000);
+    assert!(cpu.cp0().is_kernel_mode());
+
+    // Refill Handler 실행
+    for _ in 0..4 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.read_pc(), 0x0040_0000);
+    assert!(!cpu.cp0().exception_level());
+    assert!(!cpu.cp0().is_kernel_mode());
+
+    // 실패했던 명령어 재실행
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(cpu.read_pc(), 0x0040_0004);
+}
+
+#[test]
+fn config_initialization() {
+    use crate::cp0::Cp0;
+
+    let cp0 = Cp0::new();
+
+    assert_eq!(cp0.read_config(), 0x8000_0482);
+    assert_eq!(cp0.read_config1(), 0x3E00_0000);
+}
+
+#[test]
+fn config_architecture_fields() {
+    use crate::cp0::Cp0;
+
+    let cp0 = Cp0::new();
+    let config = cp0.read_config();
+
+    assert_eq!((config >> 31) & 1, 1);
+    assert_eq!((config >> 15) & 1, 0);
+    assert_eq!((config >> 13) & 3, 0);
+    assert_eq!((config >> 10) & 7, 1);
+    assert_eq!((config >> 7) & 7, 1);
+    assert_eq!(config & 7, 2);
+}
+
+#[test]
+fn config_tlb_size() {
+    use crate::cp0::{Cp0, TLB_SIZE};
+
+    let cp0 = Cp0::new();
+    let config1 = cp0.read_config1();
+
+    let mmu_size = (config1 >> 25) & 0x3F;
+
+    assert_eq!(mmu_size as usize + 1, TLB_SIZE);
+
+    // Config2 미지원
+    assert_eq!(config1 >> 31, 0);
+
+    // FPU 미지원
+    assert_eq!(config1 & 1, 0);
+}
+
+#[test]
+fn config_write_mask() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+
+    cp0.write_reg(16, 0, u32::MAX);
+
+    assert_eq!(cp0.read_config(), 0x8000_0487);
+
+    cp0.write_reg(16, 0, 0);
+
+    assert_eq!(cp0.read_config(), 0x8000_0480);
+
+    cp0.write_reg(16, 0, 2);
+
+    assert_eq!(cp0.read_config(), 0x8000_0482);
+}
+
+#[test]
+fn config1_read_only() {
+    use crate::cp0::Cp0;
+
+    let mut cp0 = Cp0::new();
+    let old = cp0.read_config1();
+
+    assert!(cp0.write_reg(16, 1, u32::MAX));
+    assert_eq!(cp0.read_config1(), old);
+
+    assert!(cp0.write_reg(16, 1, 0));
+    assert_eq!(cp0.read_config1(), old);
+}
+
+#[test]
+fn config_register_transfer() {
+    let cpu = run(
+        &[
+            encode_cp0(0, 8, 16, 0),
+            encode_cp0(0, 9, 16, 1),
+            encode_cp0(4, 10, 16, 0),
+            encode_cp0(0, 11, 16, 0),
+            encode_cp0(4, 10, 16, 1),
+            encode_cp0(0, 12, 16, 1),
+        ],
+        &[(10, 3)],
+    );
+
+    assert_eq!(cpu.read_reg(8), 0x8000_0482);
+    assert_eq!(cpu.read_reg(9), 0x3E00_0000);
+    assert_eq!(cpu.read_reg(11), 0x8000_0483);
+    assert_eq!(cpu.read_reg(12), 0x3E00_0000);
+
+    assert!(!cpu.cp0().exception_level());
+}

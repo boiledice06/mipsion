@@ -29,24 +29,29 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 105/291개(36.08%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 37개, 대기 186개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 54/54 통과했다. 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
+현재 실행 경로는 114/291개(39.18%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 46개, 대기 177개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 145/145 통과했다.
+
+이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
 | 실행 상태 | 수 | 비율 |
 | --- | ---: | ---: |
 | 구현 | 68 | 23.37% |
-| 부분 | 37 | 12.71% |
-| 대기 | 186 | 63.92% |
-| 실행 경로 합계 | 105 | 36.08% |
+| 부분 | 46 | 15.81% |
+| 대기 | 177 | 60.82% |
+| 실행 경로 합계 | 114 | 39.18% |
 
-ADD/ADDI/SUB overflow, SYSCALL/BREAK/trap은 CP0 예외 상태 기록까지 구현했으나 예외 벡터 대신 정지한다. 메모리 정렬 검사는 구현했으나 접근 범위, MMU 및 접근 예외는 남아 있다. LL/SC는 단일 CPU reservation 모델이다. PAUSE, SYNC, SYNCI, HB jump는 단순화되어 있으며 RDHWR 권한 검사와 실제 Count 타이밍은 미구현이다. JR/JALR의 target fetch 정렬 검사는 구현되었다. 구현 표시는 정상 실행 의미 기준이며 전체 UNPREDICTABLE 정책 및 exhaustive 검증은 별도다.
+v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, timer/software interrupt, MMU, 32-entry TLB 및 TLB refill을 지원한다.
+
+Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
 ## 작업 순서
 
 - [x] Integer ALU, HI/LO, load/store, branch/jump 및 delay slot.
 - [x] 기초 CP0 예외 상태, overflow, trap 및 주소 정렬 검사.
 - [x] 단일 CPU LL/SC, synchronization/hazard 기본 경로, RDHWR 기본 경로.
-- [ ] CP0 접근 명령어, 권한 모델, 예외 벡터 및 ERET.
-- [ ] MMU/TLB, 메모리 접근 예외 및 cache 기능.
+- [x] CP0 접근 명령어, 기본 권한 모델, 예외 벡터 및 ERET.
+- [x] 기본 MMU/TLB 및 TLB 접근 예외.
+- [ ] 물리 메모리 범위 검사 및 cache 기능.
 - [ ] FPU 및 선택 기능.
 
 ## 정의 생성
@@ -173,14 +178,14 @@ ADD/ADDI/SUB overflow, SYSCALL/BREAK/trap은 CP0 예외 상태 기록까지 구�
 | `CVT.W.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x24` | `0xFFFF003F` | `0x46200024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
 | `CVT.W.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x24` | `0xFFFF003F` | `0x46000024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
 | `DERET` | EJTAG | 대기 | 대기 | `0x10` | `0x1F` | `0xFFFFFFFF` | `0x4200001F` | — | DEPC에서 실행을 재개하고 Debug Mode 종료 | Coprocessor Unusable Exception Reserved Instruction Exception. Debug Mode 외 실행 시 UNDEFINED | 114 |
-| `DI` | CP0 | 대기 | 대기 | `0x10` | — | `0xFFE0FFFF` | `0x41606000` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 해제 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 115 |
+| `DI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606000` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 해제 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 115 |
 | `DIV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1A` | `0xFC00FFFF` | `0x0000001A` | `rs, rt` | signed 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 116 |
 | `DIV.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x03` | `0xFFE0003F` | `0x46200003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
 | `DIV.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x03` | `0xFFE0003F` | `0x46000003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
 | `DIVU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1B` | `0xFC00FFFF` | `0x0000001B` | `rs, rt` | unsigned 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 119 |
 | `EHB` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x00` | `0xFFFFFFFF` | `0x000000C0` | — | 앞선 명령어의 execution hazard 해소 | — | 120 |
-| `EI` | CP0 | 대기 | 대기 | `0x10` | — | `0xFFE0FFFF` | `0x41606020` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 설정 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 121 |
-| `ERET` | CP0 | 대기 | 대기 | `0x10` | `0x18` | `0xFFFFFFFF` | `0x42000018` | — | ERL이면 ErrorEPC와 ERL, 그 외는 EPC와 EXL을 사용하여 exception return | Coprocessor Unusable Exception | 122 |
+| `EI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606020` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 설정 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 121 |
+| `ERET` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | `0x18` | `0xFFFFFFFF` | `0x42000018` | — | ERL이면 ErrorEPC와 ERL, 그 외는 EPC와 EXL을 사용하여 exception return | Coprocessor Unusable Exception | 122 |
 | `EXT` | CPU 필수 | 구현 | 회귀 통과 | `0x1F` | `0x00` | `0xFC00003F` | `0x7C000000` | `rt, rs, pos, size` | rs의 pos부터 size비트를 추출하고 zero-extend | Reserved Instruction. pos + size > 32이면 UNPREDICTABLE | 123 |
 | `FLOOR.L.D` | FPU 64 | 대기 | 대기 | `0x11` | `0x0B` | `0xFFFF003F` | `0x4620000B` | `fd, fs` | −∞ 방향 반올림으로 L signed 정수 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 125 |
 | `FLOOR.L.S` | FPU 64 | 대기 | 대기 | `0x11` | `0x0B` | `0xFFFF003F` | `0x4600000B` | `fd, fs` | −∞ 방향 반올림으로 L signed 정수 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 125 |
@@ -215,7 +220,7 @@ ADD/ADDI/SUB overflow, SYSCALL/BREAK/trap은 CP0 예외 상태 기록까지 구�
 | `MADD.PS` | FPU 64 | 대기 | 대기 | `0x13` | `0x26` | `0xFC00003F` | `0x4C000026` | `fd, fr, fs, ft` | fs × ft + fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 157 |
 | `MADD.S` | FPU 64 | 대기 | 대기 | `0x13` | `0x20` | `0xFC00003F` | `0x4C000020` | `fd, fr, fs, ft` | fs × ft + fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 157 |
 | `MADDU` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x01` | `0xFC00FFFF` | `0x70000001` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에 더함 | — | 158 |
-| `MFC0` | CP0 | 대기 | 대기 | `0x10` | — | `0xFFE007F8` | `0x40000000` | `rt, rd[, sel]` | CP0[rd, sel]을 rt로 이동 | Coprocessor Unusable, Reserved Instruction | 159 |
+| `MFC0` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE007F8` | `0x40000000` | `rt, rd[, sel]` | CP0[rd, sel]을 rt로 이동 | Coprocessor Unusable, Reserved Instruction | 159 |
 | `MFC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44000000` | `rt, fs` | FPR 하위 word → rt | Coprocessor Unusable, Reserved Instruction | 160 |
 | `MFC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48000000` | `rt, rd[, sel]` (예시) | CP2 register 하위 word → rt | Coprocessor Unusable. Impl의 register가 없으면 UNPREDICTABLE | 161 |
 | `MFHC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44600000` | `rt, fs` | FPR 상위 word → rt | Coprocessor Unusable, Reserved Instruction | 162 |
@@ -246,7 +251,7 @@ ADD/ADDI/SUB overflow, SYSCALL/BREAK/trap은 CP0 예외 상태 기록까지 구�
 | `MSUB.PS` | FPU 64 | 대기 | 대기 | `0x13` | `0x2E` | `0xFC00003F` | `0x4C00002E` | `fd, fr, fs, ft` | fs × ft − fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 176 |
 | `MSUB.S` | FPU 64 | 대기 | 대기 | `0x13` | `0x28` | `0xFC00003F` | `0x4C000028` | `fd, fr, fs, ft` | fs × ft − fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 176 |
 | `MSUBU` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x05` | `0xFC00FFFF` | `0x70000005` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에서 뺌 | — | 177 |
-| `MTC0` | CP0 | 대기 | 대기 | `0x10` | — | `0xFFE007F8` | `0x40800000` | `rt, rd[, sel]` | rt를 CP0[rd, sel]로 이동 | Coprocessor Unusable, Reserved Instruction | 178 |
+| `MTC0` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE007F8` | `0x40800000` | `rt, rd[, sel]` | rt를 CP0[rd, sel]로 이동 | Coprocessor Unusable, Reserved Instruction | 178 |
 | `MTC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44800000` | `rt, fs` | FPR rt → 하위 word | Coprocessor Unusable | 179 |
 | `MTC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48800000` | `rt, rd[, sel]` (예시) | CP2 register rt → 하위 word | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없으면 UNPREDICTABLE | 180 |
 | `MTHC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44E00000` | `rt, fs` | FPR rt → 상위 word | Coprocessor Unusable, Reserved Instruction | 181 |
@@ -334,10 +339,10 @@ ADD/ADDI/SUB overflow, SYSCALL/BREAK/trap은 CP0 예외 상태 기록까지 구�
 | `TGEI` | CPU 필수 | 부분 | 기초 예외 경로 | `0x01` | — | `0xFC1F0000` | `0x04080000` | `rs, immediate` | sign-extended immediate와 비교해 signed rs가 비교값 이상이면 Trap 발생 | Trap | 261 |
 | `TGEIU` | CPU 필수 | 부분 | 기초 예외 경로 | `0x01` | — | `0xFC1F0000` | `0x04090000` | `rs, immediate` | sign-extended immediate와 비교해 unsigned rs가 비교값 이상이면 Trap 발생 | Trap | 262 |
 | `TGEU` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x31` | `0xFC00003F` | `0x00000031` | `rs, rt` | rt와 비교해 unsigned rs가 비교값 이상이면 Trap 발생 | Trap | 263 |
-| `TLBP` | TLB | 대기 | 대기 | `0x10` | `0x08` | `0xFFFFFFFF` | `0x42000008` | — | EntryHi와 일치하는 TLB 엔트리를 찾아 Index 갱신 | Coprocessor Unusable Machine Check | 264 |
-| `TLBR` | TLB | 대기 | 대기 | `0x10` | `0x01` | `0xFFFFFFFF` | `0x42000001` | — | Index의 TLB 엔트리를 CP0 레지스터로 읽음 | Coprocessor Unusable Machine Check. Index가 범위 밖이면 UNDEFINED | 265 |
-| `TLBWI` | TLB | 대기 | 대기 | `0x10` | `0x02` | `0xFFFFFFFF` | `0x42000002` | — | CP0의 TLB 데이터를 Index 엔트리에 기록 | Coprocessor Unusable Machine Check. Index가 범위 밖이면 UNDEFINED | 267 |
-| `TLBWR` | TLB | 대기 | 대기 | `0x10` | `0x06` | `0xFFFFFFFF` | `0x42000006` | — | CP0의 TLB 데이터를 Random 엔트리에 기록 | Coprocessor Unusable Machine Check | 269 |
+| `TLBP` | TLB | 부분 | 회귀 통과 (제한 범위) | `0x10` | `0x08` | `0xFFFFFFFF` | `0x42000008` | — | EntryHi와 일치하는 TLB 엔트리를 찾아 Index 갱신 | Coprocessor Unusable Machine Check | 264 |
+| `TLBR` | TLB | 부분 | 회귀 통과 (제한 범위) | `0x10` | `0x01` | `0xFFFFFFFF` | `0x42000001` | — | Index의 TLB 엔트리를 CP0 레지스터로 읽음 | Coprocessor Unusable Machine Check. Index가 범위 밖이면 UNDEFINED | 265 |
+| `TLBWI` | TLB | 부분 | 회귀 통과 (제한 범위) | `0x10` | `0x02` | `0xFFFFFFFF` | `0x42000002` | — | CP0의 TLB 데이터를 Index 엔트리에 기록 | Coprocessor Unusable Machine Check. Index가 범위 밖이면 UNDEFINED | 267 |
+| `TLBWR` | TLB | 부분 | 회귀 통과 (제한 범위) | `0x10` | `0x06` | `0xFFFFFFFF` | `0x42000006` | — | CP0의 TLB 데이터를 Random 엔트리에 기록 | Coprocessor Unusable Machine Check | 269 |
 | `TLT` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x32` | `0xFC00003F` | `0x00000032` | `rs, rt` | rt와 비교해 signed rs가 비교값 미만이면 Trap 발생 | Trap | 270 |
 | `TLTI` | CPU 필수 | 부분 | 기초 예외 경로 | `0x01` | — | `0xFC1F0000` | `0x040A0000` | `rs, immediate` | sign-extended immediate와 비교해 signed rs가 비교값 미만이면 Trap 발생 | Trap | 271 |
 | `TLTIU` | CPU 필수 | 부분 | 기초 예외 경로 | `0x01` | — | `0xFC1F0000` | `0x040B0000` | `rs, immediate` | sign-extended immediate와 비교해 unsigned rs가 비교값 미만이면 Trap 발생 | Trap | 272 |

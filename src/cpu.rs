@@ -7,7 +7,7 @@ use crate::instruction::RawInstruction;
 use crate::cp0::Cp0;
 use crate::exception::Exception;
 
-use crate::mmu::{AccessType, Mmu};
+use crate::mmu::{AccessType, Mmu, TranslationMode};
 
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
@@ -21,6 +21,7 @@ pub struct Cpu {
     in_delay_slot: bool,
     next_delay_slot: bool,
     reservation: Option<u32>,
+    translation_mode: TranslationMode,
 }
 
 impl Cpu {
@@ -37,6 +38,7 @@ impl Cpu {
             in_delay_slot: false,
             next_delay_slot: false,
             reservation: None,
+            translation_mode: TranslationMode::Bare,
         }
     }
 
@@ -168,11 +170,12 @@ impl Cpu {
     }
 
     pub fn raise_exception(&mut self, exception: Exception, bad_address: Option<u32>) {
+        // Exception 진입 이전의 EXL로 Vector 결정
+        let vector = self.cp0.exception_vector(exception);
+
         self.cp0
             .enter_exception(exception, self.current_pc, self.in_delay_slot, bad_address);
 
-        // Exception Handler로 실행 흐름 이동
-        let vector = self.cp0.exception_vector(exception);
         self.write_pc(vector);
 
         self.in_delay_slot = false;
@@ -210,7 +213,13 @@ impl Cpu {
     }
 
     pub fn translate_address(&mut self, address: u32, access: AccessType) -> Option<u32> {
-        match Mmu::translate(address, self.cp0.privilege_mode(), access) {
+        let result = match self.translation_mode {
+            TranslationMode::Bare => Mmu::translate(address, self.cp0.privilege_mode(), access),
+
+            TranslationMode::Tlb => Mmu::translate_with_tlb(address, &self.cp0, access),
+        };
+
+        match result {
             Ok(physical) => Some(physical),
 
             Err(exception) => {
@@ -219,5 +228,11 @@ impl Cpu {
                 None
             }
         }
+    }
+
+    pub fn new_with_tlb() -> Self {
+        let mut cpu = Self::new();
+        cpu.translation_mode = TranslationMode::Tlb;
+        cpu
     }
 }

@@ -3,6 +3,10 @@ use crate::tlb::{Tlb, TlbEntry};
 
 pub const TLB_SIZE: usize = 32;
 
+const CONFIG_RESET: u32 = (1 << 31) | (1 << 10) | (1 << 7) | 2;
+
+const CONFIG1: u32 = ((TLB_SIZE - 1) as u32) << 25;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeMode {
     Kernel,
@@ -31,6 +35,7 @@ pub struct Cp0 {
     wired: u32,
     entry_hi: u32,
     tlb: Tlb,
+    config: u32,
 }
 
 impl Cp0 {
@@ -55,6 +60,7 @@ impl Cp0 {
             wired: 0,
             entry_hi: 0,
             tlb: Tlb::new(),
+            config: CONFIG_RESET,
         }
     }
 
@@ -119,6 +125,14 @@ impl Cp0 {
 
         if let Some(address) = bad_address {
             self.bad_vaddr = address;
+
+            if exception.is_tlb_exception() {
+                // Context.BadVPN2 갱신
+                self.context = (self.context & 0xFF80_0000) | ((address >> 9) & 0x007F_FFF0);
+
+                // EntryHi.VPN2 갱신, ASID 보존
+                self.entry_hi = (address & 0xFFFF_E000) | (self.entry_hi & 0xFF);
+            }
         }
     }
 
@@ -182,6 +196,9 @@ impl Cp0 {
             (5, 0) => Some(self.page_mask),
             (6, 0) => Some(self.wired),
             (10, 0) => Some(self.entry_hi),
+
+            (16, 0) => Some(self.config),
+            (16, 1) => Some(CONFIG1),
 
             _ => None,
         }
@@ -265,6 +282,15 @@ impl Cp0 {
                 self.entry_hi = value & 0xFFFF_E0FF;
             }
 
+            (16, 0) => {
+                // Config.K0만 쓰기 허용
+                self.config = (self.config & !7) | (value & 7);
+            }
+
+            (16, 1) => {
+                // Config1은 Read-only Register
+            }
+
             _ => return false,
         }
 
@@ -303,7 +329,9 @@ impl Cp0 {
             self.ebase & 0xFFFF_F000
         };
 
-        let offset = if exception == Exception::Interrupt && self.cause & (1 << 23) != 0 {
+        let offset = if exception.is_tlb_refill() && !self.exception_level() {
+            0x000
+        } else if exception == Exception::Interrupt && self.cause & (1 << 23) != 0 {
             0x200
         } else {
             0x180
@@ -481,5 +509,13 @@ impl Cp0 {
 
     pub fn tlb(&self) -> &Tlb {
         &self.tlb
+    }
+
+    pub fn read_config(&self) -> u32 {
+        self.config
+    }
+
+    pub fn read_config1(&self) -> u32 {
+        CONFIG1
     }
 }

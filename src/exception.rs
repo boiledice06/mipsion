@@ -1,19 +1,53 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
 pub enum Exception {
-    Interrupt = 0,
-    AddressErrorLoad = 4,
-    AddressErrorStore = 5,
-    Syscall = 8,
-    Breakpoint = 9,
-    ReservedInstruction = 10,
-    CoprocessorUnusable = 11,
-    Overflow = 12,
-    Trap = 13,
+    Interrupt,
+    TlbModified,
+    TlbRefillLoad,
+    TlbRefillStore,
+    TlbInvalidLoad,
+    TlbInvalidStore,
+    AddressErrorLoad,
+    AddressErrorStore,
+    Syscall,
+    Breakpoint,
+    ReservedInstruction,
+    CoprocessorUnusable,
+    Overflow,
+    Trap,
+    MachineCheck,
 }
 
 impl Exception {
     pub fn code(self) -> u32 {
-        self as u32
+        match self {
+            Self::Interrupt => 0,
+            Self::TlbModified => 1,
+            Self::TlbRefillLoad | Self::TlbInvalidLoad => 2,
+            Self::TlbRefillStore | Self::TlbInvalidStore => 3,
+            Self::AddressErrorLoad => 4,
+            Self::AddressErrorStore => 5,
+            Self::Syscall => 8,
+            Self::Breakpoint => 9,
+            Self::ReservedInstruction => 10,
+            Self::CoprocessorUnusable => 11,
+            Self::Overflow => 12,
+            Self::Trap => 13,
+            Self::MachineCheck => 24,
+        }
+    }
+
+    pub fn is_tlb_refill(self) -> bool {
+        matches!(self, Self::TlbRefillLoad | Self::TlbRefillStore)
+    }
+
+    pub fn is_tlb_exception(self) -> bool {
+        matches!(
+            self,
+            Self::TlbModified
+                | Self::TlbRefillLoad
+                | Self::TlbRefillStore
+                | Self::TlbInvalidLoad
+                | Self::TlbInvalidStore
+        )
     }
 }
