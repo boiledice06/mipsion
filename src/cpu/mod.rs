@@ -1,3 +1,10 @@
+pub mod alu;
+pub mod cp0;
+pub mod cp1;
+pub mod exception;
+pub mod executor;
+pub mod fpu;
+
 use crate::memory::Memory;
 
 use crate::decoder::decode;
@@ -288,5 +295,11 @@ impl Cpu {
 
     pub fn last_instruction(&self) -> Option<u32> {
         self.last_instruction
+    }
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new()
     }
 }

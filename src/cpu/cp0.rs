@@ -530,3 +530,9 @@ impl Cp0 {
         CONFIG1
     }
 }
+
+impl Default for Cp0 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
