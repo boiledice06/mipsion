@@ -1,6 +1,12 @@
 
 <p align="center">
-  <img src="assets/logo.png" alt="MIPSion" width="480">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="assets/logo-dark.png">
+    <source media="(prefers-color-scheme: light)"
+            srcset="assets/logo.png">
+    <img alt="MIPSion" src="assets/logo.png" width="480">
+  </picture>
 </p>
 
 <h3 align="center">
