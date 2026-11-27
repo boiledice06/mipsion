@@ -24,6 +24,8 @@ pub struct Cpu {
     next_delay_slot: bool,
     reservation: Option<u32>,
     translation_mode: TranslationMode,
+    exception_count: u64,
+    last_instruction: Option<u32>,
 }
 
 impl Cpu {
@@ -42,6 +44,8 @@ impl Cpu {
             next_delay_slot: false,
             reservation: None,
             translation_mode: TranslationMode::Bare,
+            exception_count: 0,
+            last_instruction: None,
         }
     }
 
@@ -63,6 +67,10 @@ impl Cpu {
 
         let address = self.translate_address(self.pc, AccessType::Fetch)?;
 
+        if !self.check_memory_access(memory, address, 4, AccessType::Fetch) {
+            return None;
+        }
+
         let word = memory.read_word(address);
 
         self.pc = self.next_pc;
@@ -72,6 +80,8 @@ impl Cpu {
     }
 
     pub fn step(&mut self, memory: &mut Memory) {
+        self.last_instruction = None;
+
         if self.halted {
             return;
         }
@@ -100,6 +110,8 @@ impl Cpu {
         let Some(word) = self.fetch(memory) else {
             return;
         };
+
+        self.last_instruction = Some(word);
 
         let raw_inst = RawInstruction::new(word);
 
@@ -181,6 +193,8 @@ impl Cpu {
     }
 
     pub fn raise_exception(&mut self, exception: Exception, bad_address: Option<u32>) {
+        self.exception_count = self.exception_count.wrapping_add(1);
+
         // Exception 진입 이전의 EXL로 Vector 결정
         let vector = self.cp0.exception_vector(exception);
 
@@ -245,5 +259,34 @@ impl Cpu {
         let mut cpu = Self::new();
         cpu.translation_mode = TranslationMode::Tlb;
         cpu
+    }
+
+    pub fn check_memory_access(
+        &mut self,
+        memory: &Memory,
+        address: u32,
+        size: usize,
+        access: AccessType,
+    ) -> bool {
+        if memory.contains_range(address, size) {
+            return true;
+        }
+
+        let exception = match access {
+            AccessType::Fetch => Exception::InstructionBusError,
+            AccessType::Load | AccessType::Store => Exception::DataBusError,
+        };
+
+        self.raise_exception(exception, None);
+
+        false
+    }
+
+    pub fn exception_count(&self) -> u64 {
+        self.exception_count
+    }
+
+    pub fn last_instruction(&self) -> Option<u32> {
+        self.last_instruction
     }
 }

@@ -116,4 +116,24 @@ impl Memory {
             self.write_byte(base + i, byte);
         }
     }
+
+    pub fn size(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn contains_range(&self, address: u32, size: usize) -> bool {
+        if size == 0 {
+            return false;
+        }
+
+        let Ok(last_offset) = u32::try_from(size - 1) else {
+            return false;
+        };
+
+        let Some(last_address) = address.checked_add(last_offset) else {
+            return false;
+        };
+
+        (last_address as usize) < self.size()
+    }
 }

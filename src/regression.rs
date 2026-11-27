@@ -8796,3 +8796,1734 @@ fn cp1_trap_preserves_unrelated_state() {
 
     assert_eq!(cpu.cp1().read_fcsr(), before | (1 << 16),);
 }
+
+#[test]
+fn loader_raw_single_instruction() {
+    use crate::loader::load_raw;
+
+    let mut memory = Memory::new(64);
+    let bytes = 0x2408_002Au32.to_le_bytes();
+
+    assert_eq!(load_raw(&mut memory, 0, &bytes), Ok(()));
+    assert_eq!(memory.read_word(0), 0x2408_002A);
+}
+
+#[test]
+fn loader_raw_multiple_instructions() {
+    use crate::loader::load_raw;
+
+    let mut memory = Memory::new(64);
+
+    let bytes = [0x2A, 0x00, 0x08, 0x24, 0x01, 0x00, 0x09, 0x25];
+
+    assert_eq!(load_raw(&mut memory, 0, &bytes), Ok(()));
+
+    assert_eq!(memory.read_word(0), 0x2408_002A);
+    assert_eq!(memory.read_word(4), 0x2509_0001);
+}
+
+#[test]
+fn loader_raw_nonzero_address() {
+    use crate::loader::load_raw;
+
+    let mut memory = Memory::new(64);
+    let bytes = 0x2408_002Au32.to_le_bytes();
+
+    assert_eq!(load_raw(&mut memory, 16, &bytes), Ok(()));
+
+    assert_eq!(memory.read_word(0), 0);
+    assert_eq!(memory.read_word(16), 0x2408_002A);
+}
+
+#[test]
+fn loader_raw_empty_program() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+
+    assert_eq!(load_raw(&mut memory, 0, &[]), Err(LoadError::EmptyProgram));
+}
+
+#[test]
+fn loader_raw_unaligned_address() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+
+    assert_eq!(
+        load_raw(&mut memory, 2, &[0; 4]),
+        Err(LoadError::UnalignedAddress)
+    );
+}
+
+#[test]
+fn loader_raw_invalid_size() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+
+    assert_eq!(
+        load_raw(&mut memory, 0, &[0; 3]),
+        Err(LoadError::InvalidProgramSize)
+    );
+}
+
+#[test]
+fn loader_raw_out_of_bounds() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+
+    assert_eq!(
+        load_raw(&mut memory, 60, &[0; 8]),
+        Err(LoadError::OutOfBounds)
+    );
+}
+
+#[test]
+fn loader_raw_address_overflow() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+
+    assert_eq!(
+        load_raw(&mut memory, 0xFFFF_FFFC, &[0; 8]),
+        Err(LoadError::AddressOverflow)
+    );
+}
+
+#[test]
+fn loader_raw_exact_boundary() {
+    use crate::loader::load_raw;
+
+    let mut memory = Memory::new(64);
+    let bytes = 0x1234_5678u32.to_le_bytes();
+
+    assert_eq!(load_raw(&mut memory, 60, &bytes), Ok(()));
+    assert_eq!(memory.read_word(60), 0x1234_5678);
+}
+
+#[test]
+fn loader_raw_failure_preserves_memory() {
+    use crate::loader::{LoadError, load_raw};
+
+    let mut memory = Memory::new(64);
+    memory.write_word(60, 0x1234_5678);
+
+    assert_eq!(
+        load_raw(&mut memory, 60, &[0xFF; 8]),
+        Err(LoadError::OutOfBounds)
+    );
+
+    assert_eq!(memory.read_word(60), 0x1234_5678);
+}
+
+#[test]
+fn loader_raw_execute_program() {
+    use crate::loader::load_raw;
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    let bytes = [0x2A, 0x00, 0x08, 0x24, 0x01, 0x00, 0x09, 0x25];
+
+    load_raw(&mut memory, 16, &bytes).unwrap();
+
+    cpu.write_pc(16);
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+    assert_eq!(cpu.read_pc(), 24);
+}
+
+#[test]
+fn memory_range_exact_boundary() {
+    let memory = Memory::new(64);
+
+    assert!(memory.contains_range(60, 4));
+    assert!(memory.contains_range(63, 1));
+    assert!(memory.contains_range(0, 64));
+}
+
+#[test]
+fn memory_range_out_of_bounds() {
+    let memory = Memory::new(64);
+
+    assert!(!memory.contains_range(60, 8));
+    assert!(!memory.contains_range(64, 1));
+    assert!(!memory.contains_range(0, 65));
+}
+
+#[test]
+fn memory_range_overflow() {
+    let memory = Memory::new(64);
+
+    assert!(!memory.contains_range(u32::MAX, 4));
+    assert!(!memory.contains_range(0, 0));
+}
+
+#[test]
+fn memory_range_empty_memory() {
+    let memory = Memory::new(0);
+
+    assert!(!memory.contains_range(0, 1));
+}
+
+#[test]
+fn instruction_bus_error_out_of_bounds() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.write_pc(64);
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 6);
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+    assert_eq!(cpu.cp0().read_reg(14, 0), Some(64));
+}
+
+#[test]
+fn instruction_bus_error_partial_fetch() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(6);
+
+    cpu.write_pc(4);
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 6);
+    assert_eq!(cpu.cp0().read_reg(14, 0), Some(4));
+}
+
+#[test]
+fn data_bus_error_integer_loads() {
+    for opcode in [0x20, 0x21, 0x23, 0x24, 0x25] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(64);
+
+        memory.write_word(0, i(opcode, 8, 9, 0));
+
+        cpu.write_reg(8, 64);
+        cpu.write_reg(9, 0x1234_5678);
+
+        cpu.step(&mut memory);
+
+        assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+        assert_eq!(cpu.read_reg(9), 0x1234_5678);
+    }
+}
+
+#[test]
+fn data_bus_error_integer_stores() {
+    for opcode in [0x28, 0x29, 0x2B] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(64);
+
+        memory.write_word(0, i(opcode, 8, 9, 0));
+
+        cpu.write_reg(8, 64);
+        cpu.write_reg(9, u32::MAX);
+
+        cpu.step(&mut memory);
+
+        assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+    }
+}
+
+#[test]
+fn data_bus_error_no_partial_store() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(10);
+
+    memory.write_word(0, i(0x2B, 8, 9, 0));
+    memory.write_halfword(8, 0x1234);
+
+    cpu.write_reg(8, 8);
+    cpu.write_reg(9, u32::MAX);
+
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+    assert_eq!(memory.read_halfword(8), 0x1234);
+}
+
+#[test]
+fn data_bus_error_preserves_bad_vaddr() {
+    use crate::exception::Exception;
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.raise_exception(Exception::AddressErrorLoad, Some(0x1234_5678));
+
+    cpu.return_from_exception();
+
+    memory.write_word(0, i(0x23, 8, 9, 0));
+    cpu.write_pc(0);
+    cpu.write_reg(8, 64);
+
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 0x1234_5678);
+}
+
+#[test]
+fn alignment_exception_precedes_bus_error() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(0x23, 8, 9, 0));
+    cpu.write_reg(8, 65);
+
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 4);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 65);
+}
+
+#[test]
+fn data_bus_error_ll() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(0x30, 8, 9, 0));
+
+    cpu.write_reg(8, 64);
+    cpu.write_reg(9, 123);
+
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+    assert_eq!(cpu.read_reg(9), 123);
+    assert!(!cpu.check_reservation(64));
+}
+
+#[test]
+fn data_bus_error_sc() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(0x38, 8, 9, 0));
+
+    cpu.write_reg(8, 64);
+    cpu.write_reg(9, 123);
+    cpu.set_reservation(64);
+
+    cpu.step(&mut memory);
+
+    assert_eq!((cpu.cp0().read_cause() >> 2) & 0x1F, 7);
+    assert_eq!(cpu.read_reg(9), 123);
+    assert!(!cpu.check_reservation(64));
+}
+
+#[test]
+fn data_bus_error_fpu_loads() {
+    for opcode in [0x31, 0x35] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(64);
+
+        // Enable CP1
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        memory.write_word(0, i(opcode, 8, 2, 0));
+
+        cpu.write_reg(8, 64);
+        cpu.cp1_mut().write_word(2, 0x1234_5678);
+        cpu.cp1_mut().write_word(3, 0x8765_4321);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 7);
+        assert_eq!(cpu.cp1().read_word(2), 0x1234_5678);
+        assert_eq!(cpu.cp1().read_word(3), 0x8765_4321);
+    }
+}
+
+#[test]
+fn data_bus_error_fpu_stores() {
+    for opcode in [0x39, 0x3D] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(64);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        memory.write_word(0, i(opcode, 8, 2, 0));
+
+        cpu.write_reg(8, 64);
+        cpu.cp1_mut().write_word(2, u32::MAX);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 7);
+    }
+}
+
+#[test]
+fn data_bus_error_no_partial_doubleword_store() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(12);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    memory.write_word(0, i(0x3D, 8, 2, 0));
+    memory.write_word(8, 0x1234_5678);
+
+    cpu.write_reg(8, 8);
+    cpu.cp1_mut().write_word(2, u32::MAX);
+    cpu.cp1_mut().write_word(3, u32::MAX);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(memory.read_word(8), 0x1234_5678);
+}
+
+#[test]
+fn unaligned_left_load_at_memory_boundary() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(10);
+
+    memory.write_word(0, i(0x22, 8, 9, 0));
+    memory.write_halfword(8, 0xABCD);
+
+    cpu.write_reg(8, 9);
+    cpu.write_reg(9, 0x1234_5678);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(9), 0xABCD_5678);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn unaligned_left_store_at_memory_boundary() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(10);
+
+    memory.write_word(0, i(0x2A, 8, 9, 0));
+
+    cpu.write_reg(8, 9);
+    cpu.write_reg(9, 0xABCD_1234);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_halfword(8), 0xABCD);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn data_bus_error_unaligned_right_load() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(10);
+
+    memory.write_word(0, i(0x26, 8, 9, 0));
+
+    cpu.write_reg(8, 9);
+    cpu.write_reg(9, 0x1234_5678);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(cpu.read_reg(9), 0x1234_5678);
+}
+
+#[test]
+fn data_bus_error_unaligned_right_store() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(10);
+
+    memory.write_word(0, i(0x2E, 8, 9, 0));
+    memory.write_halfword(8, 0xABCD);
+
+    cpu.write_reg(8, 9);
+    cpu.write_reg(9, u32::MAX);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(memory.read_halfword(8), 0xABCD);
+}
+
+#[test]
+fn instruction_bus_error_in_delay_slot() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    // BEQ $zero, $zero, 1
+    memory.write_word(0, i(0x04, 0, 0, 1));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 6);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert!(cpu.cp0().branch_delay());
+}
+
+#[test]
+fn data_bus_error_in_delay_slot() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(0x04, 0, 0, 1));
+    memory.write_word(4, i(0x23, 8, 9, 0));
+
+    cpu.write_reg(8, 64);
+    cpu.write_reg(9, 123);
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert!(cpu.cp0().branch_delay());
+    assert_eq!(cpu.read_reg(9), 123);
+}
+
+#[test]
+fn data_bus_error_after_segment_translation() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(0x23, 8, 9, 0));
+
+    cpu.write_reg(8, 0x8000_0040);
+    cpu.write_reg(9, 123);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(cpu.read_reg(9), 123);
+}
+
+#[test]
+fn data_bus_error_after_tlb_translation() {
+    let mut cpu = Cpu::new_with_tlb();
+    let mut memory = Memory::new(4096);
+
+    cpu.cp0_mut().write_reg(10, 0, 0x0040_0001);
+    cpu.cp0_mut().write_reg(2, 0, 0x46);
+    cpu.cp0_mut().tlb_write_indexed();
+
+    cpu.write_pc(0x8000_0000);
+
+    memory.write_word(0, i(0x23, 8, 9, 0));
+
+    cpu.write_reg(8, 0x0040_0000);
+    cpu.write_reg(9, 123);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 7);
+    assert_eq!(cpu.read_reg(9), 123);
+}
+
+#[test]
+fn runtime_executes_program() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+    memory.write_word(4, i(9, 8, 9, 1));
+
+    let result = run(
+        &mut cpu,
+        &mut memory,
+        ExecutionConfig {
+            max_steps: 2,
+            stop_on_exception: true,
+        },
+    );
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+
+    assert_eq!(result.steps, 2);
+    assert_eq!(result.final_pc, 8);
+    assert_eq!(result.reason, StopReason::StepLimit);
+}
+
+#[test]
+fn runtime_zero_step_limit() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+
+    let result = run(
+        &mut cpu,
+        &mut memory,
+        ExecutionConfig {
+            max_steps: 0,
+            stop_on_exception: true,
+        },
+    );
+
+    assert_eq!(result.steps, 0);
+    assert_eq!(result.final_pc, 0);
+    assert_eq!(result.reason, StopReason::StepLimit);
+    assert_eq!(cpu.read_reg(8), 0);
+}
+
+#[test]
+fn runtime_infinite_loop_step_limit() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    // J 0
+    memory.write_word(0, 0x0800_0000);
+
+    // NOP (delay slot)
+    memory.write_word(4, 0);
+
+    let result = run(
+        &mut cpu,
+        &mut memory,
+        ExecutionConfig {
+            max_steps: 100,
+            stop_on_exception: true,
+        },
+    );
+
+    assert_eq!(result.steps, 100);
+    assert_eq!(result.final_pc, 0);
+    assert_eq!(result.reason, StopReason::StepLimit);
+    assert_eq!(cpu.exception_count(), 0);
+}
+
+#[test]
+fn runtime_nonzero_entry_point() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(16, i(9, 0, 8, 100));
+    cpu.write_pc(16);
+
+    let result = run(
+        &mut cpu,
+        &mut memory,
+        ExecutionConfig {
+            max_steps: 1,
+            stop_on_exception: true,
+        },
+    );
+
+    assert_eq!(cpu.read_reg(8), 100);
+    assert_eq!(result.steps, 1);
+    assert_eq!(result.final_pc, 20);
+    assert_eq!(result.reason, StopReason::StepLimit);
+}
+
+#[test]
+fn runtime_stops_on_syscall() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0x0000_000C);
+
+    let result = run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(result.steps, 1);
+    assert_eq!(result.final_pc, 0x8000_0180);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 8,
+            epc: 0,
+            in_delay_slot: false,
+        }
+    );
+}
+
+#[test]
+fn runtime_stops_on_instruction_bus_error() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    memory.write_word(0, 0);
+
+    let result = run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(result.steps, 2);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 6,
+            epc: 4,
+            in_delay_slot: false,
+        }
+    );
+}
+
+#[test]
+fn runtime_exception_in_delay_slot() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(4, 0, 0, 1));
+    memory.write_word(4, 0x0000_000C);
+
+    let result = run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(result.steps, 2);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 8,
+            epc: 0,
+            in_delay_slot: true,
+        }
+    );
+}
+
+#[test]
+fn runtime_continues_after_exception() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    // SYSCALL
+    memory.write_word(0, 0x0000_000C);
+
+    // Exception handler
+    memory.write_word(0x180, i(9, 0, 8, 42));
+
+    let result = run(
+        &mut cpu,
+        &mut memory,
+        ExecutionConfig {
+            max_steps: 2,
+            stop_on_exception: false,
+        },
+    );
+
+    assert_eq!(result.steps, 2);
+    assert_eq!(result.reason, StopReason::StepLimit);
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.exception_count(), 1);
+    assert_eq!(result.final_pc, 0x8000_0184);
+}
+
+#[test]
+fn runtime_detects_nested_exception() {
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(1024);
+
+    memory.write_word(0, 0x0000_000C);
+    memory.write_word(0x180, 0x0000_000D);
+
+    cpu.step(&mut memory);
+
+    assert!(cpu.cp0().exception_level());
+    assert_eq!(cpu.exception_count(), 1);
+
+    let result = run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(result.steps, 1);
+    assert_eq!(cpu.exception_count(), 2);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 9,
+            epc: 0,
+            in_delay_slot: false,
+        }
+    );
+}
+
+#[test]
+fn runtime_raw_binary_integration() {
+    use crate::loader::load_raw;
+    use crate::runtime::{ExecutionConfig, StopReason, run};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    let bytes = [
+        0x2A, 0x00, 0x08, 0x24, 0x01, 0x00, 0x09, 0x25, 0x0C, 0x00, 0x00, 0x00,
+    ];
+
+    load_raw(&mut memory, 16, &bytes).unwrap();
+
+    cpu.write_pc(16);
+
+    let result = run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+    assert_eq!(result.steps, 3);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 8,
+            epc: 24,
+            in_delay_slot: false,
+        }
+    );
+}
+
+fn parse_cli(args: &[&str]) -> Result<crate::cli::CliAction, String> {
+    crate::cli::parse_args(args.iter().map(|arg| arg.to_string()))
+}
+
+#[test]
+fn cli_default_configuration() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert_eq!(config.program.to_str(), Some("program.bin"));
+    assert_eq!(config.load_address, 0);
+    assert_eq!(config.entry, 0);
+    assert_eq!(config.memory_size, 16 * 1024 * 1024);
+    assert_eq!(config.max_steps, 1_000_000);
+    assert!(config.stop_on_exception);
+}
+
+#[test]
+fn cli_custom_configuration() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&[
+        "program.bin",
+        "--load-address",
+        "0x100",
+        "--entry",
+        "0x104",
+        "--memory-size",
+        "4096",
+        "--max-steps",
+        "500",
+        "--continue-on-exception",
+    ])
+    .unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert_eq!(config.load_address, 256);
+    assert_eq!(config.entry, 260);
+    assert_eq!(config.memory_size, 4096);
+    assert_eq!(config.max_steps, 500);
+    assert!(!config.stop_on_exception);
+}
+
+#[test]
+fn cli_entry_defaults_to_load_address() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin", "--load-address", "0x100"]).unwrap()
+    else {
+        panic!("expected Run action");
+    };
+
+    assert_eq!(config.entry, 256);
+}
+
+#[test]
+fn cli_decimal_and_hexadecimal_numbers() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&[
+        "program.bin",
+        "--load-address",
+        "256",
+        "--memory-size",
+        "0X1000",
+        "--max-steps",
+        "0x10",
+    ])
+    .unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert_eq!(config.load_address, 256);
+    assert_eq!(config.memory_size, 4096);
+    assert_eq!(config.max_steps, 16);
+}
+
+#[test]
+fn cli_help_action() {
+    use crate::cli::CliAction;
+
+    assert_eq!(parse_cli(&["--help"]), Ok(CliAction::Help));
+    assert_eq!(parse_cli(&["-h"]), Ok(CliAction::Help));
+}
+
+#[test]
+fn cli_version_action() {
+    use crate::cli::CliAction;
+
+    assert_eq!(parse_cli(&["--version"]), Ok(CliAction::Version));
+
+    assert_eq!(parse_cli(&["-V"]), Ok(CliAction::Version));
+}
+
+#[test]
+fn cli_missing_program() {
+    assert!(parse_cli(&[]).is_err());
+}
+
+#[test]
+fn cli_unknown_option() {
+    assert!(parse_cli(&["program.bin", "--unknown"]).is_err());
+}
+
+#[test]
+fn cli_missing_option_value() {
+    assert!(parse_cli(&["program.bin", "--max-steps"]).is_err());
+}
+
+#[test]
+fn cli_invalid_number() {
+    for value in ["abc", "-1", "0xZZ", "0x"] {
+        assert!(parse_cli(&["program.bin", "--max-steps", value,]).is_err());
+    }
+}
+
+#[test]
+fn cli_address_overflow() {
+    assert!(parse_cli(&["program.bin", "--load-address", "0x100000000",]).is_err());
+}
+
+#[test]
+fn cli_unaligned_address() {
+    for option in ["--load-address", "--entry"] {
+        assert!(parse_cli(&["program.bin", option, "3"]).is_err());
+    }
+}
+
+#[test]
+fn cli_zero_memory_size() {
+    assert!(parse_cli(&["program.bin", "--memory-size", "0",]).is_err());
+}
+
+#[test]
+fn cli_multiple_program_paths() {
+    assert!(parse_cli(&["first.bin", "second.bin"]).is_err());
+}
+
+#[test]
+fn cli_inspection_defaults() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(!config.dump_registers);
+    assert!(!config.dump_cp0);
+    assert!(!config.dump_fpu);
+    assert_eq!(config.dump_memory, None);
+}
+
+#[test]
+fn cli_inspection_options() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&[
+        "program.bin",
+        "--dump-registers",
+        "--dump-cp0",
+        "--dump-fpu",
+        "--dump-memory",
+        "0x100",
+        "32",
+    ])
+    .unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(config.dump_registers);
+    assert!(config.dump_cp0);
+    assert!(config.dump_fpu);
+    assert_eq!(config.dump_memory, Some((256, 32)));
+}
+
+#[test]
+fn cli_dump_memory_missing_arguments() {
+    assert!(parse_cli(&["program.bin", "--dump-memory",]).is_err());
+
+    assert!(parse_cli(&["program.bin", "--dump-memory", "0",]).is_err());
+}
+
+#[test]
+fn cli_dump_memory_invalid_size() {
+    for size in ["0", "-1", "65537", "abc"] {
+        assert!(parse_cli(&["program.bin", "--dump-memory", "0", size,]).is_err());
+    }
+}
+
+#[test]
+fn inspection_general_registers() {
+    use crate::inspection::dump_registers;
+
+    let mut cpu = Cpu::new();
+
+    cpu.write_reg(8, 42);
+    cpu.write_reg(9, 43);
+    cpu.write_pc(0x100);
+
+    cpu.write_hi(0x1234);
+    cpu.write_lo(0x5678);
+
+    let output = dump_registers(&cpu);
+
+    assert!(output.contains("$t0   0000002A"));
+    assert!(output.contains("$t1   0000002B"));
+    assert!(output.contains("PC       00000100"));
+    assert!(output.contains("Next PC  00000104"));
+    assert!(output.contains("HI       00001234"));
+    assert!(output.contains("LO       00005678"));
+}
+
+#[test]
+fn inspection_cp0_exception_state() {
+    use crate::inspection::dump_cp0;
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0x0000_000C);
+
+    cpu.step(&mut memory);
+
+    let output = dump_cp0(&cpu);
+
+    assert!(output.contains("ExcCode: 8"));
+    assert!(output.contains("EXL:     true"));
+    assert!(output.contains("BD:      false"));
+}
+
+#[test]
+fn inspection_fpu_registers() {
+    use crate::inspection::dump_fpu;
+
+    let mut cpu = Cpu::new();
+
+    cpu.cp1_mut().write_word(0, 0x3F80_0000);
+    cpu.cp1_mut().write_word(1, 0x4000_0000);
+
+    let output = dump_fpu(&cpu);
+
+    assert!(output.contains("$f0  3F800000"));
+    assert!(output.contains("$f1  40000000"));
+    assert!(output.contains("FCSR"));
+    assert!(output.contains("FIR"));
+}
+
+#[test]
+fn inspection_memory_little_endian() {
+    use crate::inspection::dump_memory;
+
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0x1234_5678);
+
+    let output = dump_memory(&memory, 0, 4).unwrap();
+
+    assert!(output.contains("78 56 34 12"));
+    assert!(output.contains("00000000"));
+}
+
+#[test]
+fn inspection_memory_ascii() {
+    use crate::inspection::dump_memory;
+
+    let mut memory = Memory::new(64);
+
+    for (index, byte) in b"MIPSion".iter().enumerate() {
+        memory.write_byte(index as u32, *byte);
+    }
+
+    let output = dump_memory(&memory, 0, 7).unwrap();
+
+    assert!(output.contains("|MIPSion|"));
+}
+
+#[test]
+fn inspection_memory_multiple_rows() {
+    use crate::inspection::dump_memory;
+
+    let memory = Memory::new(64);
+
+    let output = dump_memory(&memory, 0, 32).unwrap();
+
+    assert!(output.contains("00000000"));
+    assert!(output.contains("00000010"));
+}
+
+#[test]
+fn inspection_memory_exact_boundary() {
+    use crate::inspection::dump_memory;
+
+    let mut memory = Memory::new(64);
+
+    memory.write_byte(63, 0xAB);
+
+    let output = dump_memory(&memory, 63, 1).unwrap();
+
+    assert!(output.contains("0000003F"));
+    assert!(output.contains("AB"));
+}
+
+#[test]
+fn inspection_memory_invalid_range() {
+    use crate::inspection::dump_memory;
+
+    let memory = Memory::new(64);
+
+    assert!(dump_memory(&memory, 60, 8).is_err());
+    assert!(dump_memory(&memory, 0, 0).is_err());
+    assert!(dump_memory(&memory, u32::MAX, 4).is_err());
+}
+
+#[test]
+fn trace_last_instruction() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    memory.write_word(0, 0x2408_002A);
+
+    assert_eq!(cpu.last_instruction(), None);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.last_instruction(), Some(0x2408_002A),);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.last_instruction(), None);
+    assert_eq!(cpu.cp0().exception_code(), 6);
+}
+
+#[test]
+fn trace_register_change() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.step, 1);
+    assert_eq!(event.pc, 0);
+    assert_eq!(event.next_pc, 4);
+
+    assert_eq!(event.instruction, Some(0x2408_002A),);
+
+    assert_eq!(event.mnemonic, Some("addiu"));
+    assert_eq!(event.register_changes.len(), 1);
+
+    let change = event.register_changes[0];
+
+    assert_eq!(change.index, 8);
+    assert_eq!(change.before, 0);
+    assert_eq!(change.after, 42);
+    assert!(event.exception.is_none());
+}
+
+#[test]
+fn trace_unchanged_registers() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert!(event.register_changes.is_empty());
+    assert!(event.hi_change.is_none());
+    assert!(event.lo_change.is_none());
+}
+
+#[test]
+fn trace_hilo_changes() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.write_hi(0x1234);
+    cpu.write_lo(0x5678);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.hi_change.unwrap().before, 0);
+    assert_eq!(event.hi_change.unwrap().after, 0x1234);
+
+    assert_eq!(event.lo_change.unwrap().before, 0);
+    assert_eq!(event.lo_change.unwrap().after, 0x5678);
+}
+
+#[test]
+fn trace_syscall_exception() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0x0000_000C);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.mnemonic, Some("syscall"));
+    assert_eq!(event.next_pc, 0x8000_0180);
+
+    let exception = event.exception.unwrap();
+
+    assert_eq!(exception.code, 8);
+    assert_eq!(exception.epc, 0);
+    assert!(!exception.in_delay_slot);
+}
+
+#[test]
+fn trace_fetch_failure() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.write_pc(4);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.instruction, None);
+    assert_eq!(event.mnemonic, None);
+    assert_eq!(event.exception.unwrap().code, 6);
+}
+
+#[test]
+fn trace_delay_slot_exception() {
+    use crate::runtime::{ExecutionConfig, run_with_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(4, 0, 0, 1));
+    memory.write_word(4, 0x0000_000C);
+
+    let mut events = Vec::new();
+
+    run_with_trace(&mut cpu, &mut memory, ExecutionConfig::default(), |event| {
+        events.push(event.clone())
+    });
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1].pc, 4);
+
+    let exception = events[1].exception.unwrap();
+
+    assert_eq!(exception.code, 8);
+    assert_eq!(exception.epc, 0);
+    assert!(exception.in_delay_slot);
+}
+
+#[test]
+fn runtime_trace_event_sequence() {
+    use crate::runtime::{ExecutionConfig, run_with_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+    memory.write_word(4, i(9, 8, 9, 1));
+    memory.write_word(8, 0x0000_000C);
+
+    let mut events = Vec::new();
+
+    let result = run_with_trace(&mut cpu, &mut memory, ExecutionConfig::default(), |event| {
+        events.push(event.clone())
+    });
+
+    assert_eq!(result.steps, 3);
+    assert_eq!(events.len(), 3);
+
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event.step, index as u64 + 1);
+        assert_eq!(event.pc, index as u32 * 4);
+    }
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+    assert_eq!(events[2].exception.unwrap().code, 8);
+}
+
+#[test]
+fn runtime_trace_does_not_change_execution() {
+    use crate::runtime::{ExecutionConfig, run, run_with_trace};
+    use crate::trace::CpuSnapshot;
+
+    let mut normal_cpu = Cpu::new();
+    let mut traced_cpu = Cpu::new();
+
+    let mut normal_memory = Memory::new(128);
+    let mut traced_memory = Memory::new(128);
+
+    let words = [
+        i(9, 0, 8, 42),
+        i(9, 8, 9, 1),
+        i(0x2B, 0, 9, 64),
+        0x0000_000C,
+    ];
+
+    for (index, &word) in words.iter().enumerate() {
+        normal_memory.write_word(index as u32 * 4, word);
+        traced_memory.write_word(index as u32 * 4, word);
+    }
+
+    let config = ExecutionConfig::default();
+
+    let normal_result = run(&mut normal_cpu, &mut normal_memory, config);
+
+    let traced_result = run_with_trace(&mut traced_cpu, &mut traced_memory, config, |_| {});
+
+    assert_eq!(normal_result, traced_result);
+
+    assert_eq!(
+        CpuSnapshot::capture(&normal_cpu),
+        CpuSnapshot::capture(&traced_cpu),
+    );
+
+    assert_eq!(normal_cpu.cp0().read_cause(), traced_cpu.cp0().read_cause(),);
+
+    for address in 0..128 {
+        assert_eq!(
+            normal_memory.read_byte(address),
+            traced_memory.read_byte(address),
+        );
+    }
+}
+
+#[test]
+fn trace_output_format() {
+    use crate::trace::{CpuSnapshot, TraceEvent, format_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+    let output = format_trace(&event);
+
+    assert!(output.contains("[000001]"));
+    assert!(output.contains("PC=00000000"));
+    assert!(output.contains("2408002A"));
+    assert!(output.contains("addiu"));
+    assert!(output.contains("$t0: 00000000 -> 0000002A"));
+    assert!(output.contains("PC -> 00000004"));
+}
+
+#[test]
+fn cli_trace_default_disabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(!config.trace);
+}
+
+#[test]
+fn cli_trace_enabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin", "--trace"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(config.trace);
+}
+
+fn elf_fixture() -> Vec<u8> {
+    let mut bytes = vec![0u8; 0x10C];
+
+    bytes[..4].copy_from_slice(b"\x7FELF");
+
+    bytes[4] = 1;
+    bytes[5] = 1;
+    bytes[6] = 1;
+
+    let fields16: [(usize, u16); 5] = [(16, 2), (18, 8), (40, 52), (42, 32), (44, 1)];
+
+    for (offset, value) in fields16 {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    let fields32: [(usize, u32); 11] = [
+        (20, 1),
+        (24, 0x1000),
+        (28, 52),
+        // Program header
+        (52, 1),
+        (56, 0x100),
+        (60, 0x1000),
+        (64, 0x1000),
+        (68, 12),
+        (72, 32),
+        (76, 5),
+        (80, 4),
+    ];
+
+    for (offset, value) in fields32 {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    let words: [u32; 3] = [0x2408_002A, 0x2509_0001, 0x0000_000C];
+
+    for (index, word) in words.iter().enumerate() {
+        let offset = 0x100 + index * 4;
+
+        bytes[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+    }
+
+    bytes
+}
+
+#[test]
+fn elf_header_valid() {
+    let bytes = elf_fixture();
+
+    let header = crate::elf::parse_header(&bytes).unwrap();
+
+    assert_eq!(header.entry, 0x1000);
+    assert_eq!(header.phoff, 52);
+    assert_eq!(header.phentsize, 32);
+    assert_eq!(header.phnum, 1);
+}
+
+#[test]
+fn elf_header_truncated() {
+    use crate::elf::{ElfError, parse_header};
+
+    for size in 0..52 {
+        assert_eq!(parse_header(&vec![0; size]), Err(ElfError::Truncated),);
+    }
+}
+
+#[test]
+fn elf_invalid_magic() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes[0] = 0;
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::InvalidMagic),);
+}
+
+#[test]
+fn elf_unsupported_class() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes[4] = 2;
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::UnsupportedClass),);
+}
+
+#[test]
+fn elf_unsupported_endian() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes[5] = 2;
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::UnsupportedEndian),);
+}
+
+#[test]
+fn elf_unsupported_machine() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes[18] = 62;
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::UnsupportedMachine),);
+}
+
+#[test]
+fn elf_unsupported_type() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes[16] = 3;
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::UnsupportedType),);
+}
+
+#[test]
+fn elf_truncated_program_header() {
+    use crate::elf::{ElfError, parse_header};
+
+    let mut bytes = elf_fixture();
+
+    bytes.truncate(60);
+
+    assert_eq!(parse_header(&bytes), Err(ElfError::Truncated),);
+}
+
+#[test]
+fn elf_dynamic_segment_rejected() {
+    use crate::elf::{ElfError, parse_segments};
+
+    let mut bytes = elf_fixture();
+
+    bytes[52] = 3;
+
+    assert_eq!(parse_segments(&bytes), Err(ElfError::DynamicExecutable),);
+}
+
+#[test]
+fn elf_parse_load_segment() {
+    let bytes = elf_fixture();
+
+    let segments = crate::elf::parse_segments(&bytes).unwrap();
+
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].address, 0x1000);
+    assert_eq!(segments[0].offset, 0x100);
+    assert_eq!(segments[0].filesz, 12);
+    assert_eq!(segments[0].memsz, 32);
+}
+
+#[test]
+fn elf_invalid_segment_sizes() {
+    use crate::elf::{ElfError, parse_segments};
+
+    let mut bytes = elf_fixture();
+
+    bytes[72..76].copy_from_slice(&4u32.to_le_bytes());
+
+    assert_eq!(parse_segments(&bytes), Err(ElfError::InvalidSegment),);
+}
+
+#[test]
+fn elf_truncated_segment_data() {
+    use crate::elf::{ElfError, parse_segments};
+
+    let mut bytes = elf_fixture();
+
+    bytes.pop();
+
+    assert_eq!(parse_segments(&bytes), Err(ElfError::Truncated),);
+}
+
+#[test]
+fn elf_segment_address_overflow() {
+    use crate::elf::{ElfError, parse_segments};
+
+    let mut bytes = elf_fixture();
+
+    bytes[60..64].copy_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+
+    assert_eq!(parse_segments(&bytes), Err(ElfError::AddressOverflow),);
+}
+
+#[test]
+fn elf_load_program() {
+    let bytes = elf_fixture();
+    let mut memory = Memory::new(16384);
+
+    let result = crate::elf::load_elf(&mut memory, &bytes).unwrap();
+
+    assert_eq!(result.entry, 0x1000);
+    assert_eq!(result.segment_count, 1);
+
+    assert_eq!(memory.read_word(0x1000), 0x2408_002A);
+    assert_eq!(memory.read_word(0x1004), 0x2509_0001);
+    assert_eq!(memory.read_word(0x1008), 0x0000_000C);
+}
+
+#[test]
+fn elf_zero_fills_bss() {
+    let bytes = elf_fixture();
+    let mut memory = Memory::new(16384);
+
+    for address in 0x100C..0x1020 {
+        memory.write_byte(address, 0xFF);
+    }
+
+    crate::elf::load_elf(&mut memory, &bytes).unwrap();
+
+    for address in 0x100C..0x1020 {
+        assert_eq!(memory.read_byte(address), 0);
+    }
+}
+
+#[test]
+fn elf_load_out_of_bounds() {
+    use crate::elf::{ElfError, load_elf};
+
+    let bytes = elf_fixture();
+    let mut memory = Memory::new(1024);
+
+    assert_eq!(load_elf(&mut memory, &bytes), Err(ElfError::OutOfBounds),);
+}
+
+#[test]
+fn elf_invalid_entry() {
+    use crate::elf::{ElfError, load_elf};
+
+    let mut bytes = elf_fixture();
+
+    bytes[24..28].copy_from_slice(&0x2000u32.to_le_bytes());
+
+    let mut memory = Memory::new(16384);
+
+    assert_eq!(load_elf(&mut memory, &bytes), Err(ElfError::InvalidEntry),);
+}
+
+#[test]
+fn elf_stack_initialization() {
+    let bytes = elf_fixture();
+    let mut memory = Memory::new(16384);
+
+    let result = crate::elf::load_elf(&mut memory, &bytes).unwrap();
+
+    assert_eq!(result.stack_pointer, 0x3FF0);
+    assert_eq!(result.stack_pointer & 15, 0);
+
+    assert_eq!(memory.read_word(result.stack_pointer), 0,);
+}
+
+#[test]
+fn elf_insufficient_stack() {
+    use crate::elf::{ElfError, load_elf};
+
+    let bytes = elf_fixture();
+    let mut memory = Memory::new(8192);
+
+    assert_eq!(
+        load_elf(&mut memory, &bytes),
+        Err(ElfError::InsufficientStack),
+    );
+}
+
+#[test]
+fn elf_failure_preserves_memory() {
+    let mut bytes = elf_fixture();
+
+    bytes[24..28].copy_from_slice(&0x2000u32.to_le_bytes());
+
+    let mut memory = Memory::new(16384);
+
+    memory.write_word(0x1000, 0xDEAD_BEEF);
+
+    assert!(crate::elf::load_elf(&mut memory, &bytes).is_err());
+
+    assert_eq!(memory.read_word(0x1000), 0xDEAD_BEEF,);
+}
+
+#[test]
+fn elf_runtime_integration() {
+    use crate::runtime::{ExecutionConfig, StopReason};
+
+    let bytes = elf_fixture();
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(16384);
+
+    let loaded = crate::elf::load_elf(&mut memory, &bytes).unwrap();
+
+    cpu.write_pc(loaded.entry);
+    cpu.write_reg(29, loaded.stack_pointer);
+
+    let result = crate::runtime::run(&mut cpu, &mut memory, ExecutionConfig::default());
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+    assert_eq!(cpu.read_reg(29), 0x3FF0);
+    assert_eq!(result.steps, 3);
+
+    assert_eq!(
+        result.reason,
+        StopReason::Exception {
+            code: 8,
+            epc: 0x1008,
+            in_delay_slot: false,
+        },
+    );
+}
+
+#[test]
+fn elf_trace_integration() {
+    use crate::runtime::{ExecutionConfig, run_with_trace};
+
+    let bytes = elf_fixture();
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(16384);
+
+    let loaded = crate::elf::load_elf(&mut memory, &bytes).unwrap();
+
+    cpu.write_pc(loaded.entry);
+
+    let mut events = Vec::new();
+
+    run_with_trace(&mut cpu, &mut memory, ExecutionConfig::default(), |event| {
+        events.push(event.clone())
+    });
+
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].pc, 0x1000);
+    assert_eq!(events[0].mnemonic, Some("addiu"));
+    assert_eq!(events[2].mnemonic, Some("syscall"));
+}
