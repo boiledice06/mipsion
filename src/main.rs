@@ -14,6 +14,7 @@ mod runtime;
 mod tlb;
 
 mod cli;
+mod trace;
 
 mod cp0;
 mod cp1;
@@ -67,7 +68,7 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
     use cpu::Cpu;
     use loader::load_raw;
     use memory::Memory;
-    use runtime::{ExecutionConfig, run};
+    use runtime::{ExecutionConfig, run, run_with_trace};
 
     const MAX_MEMORY_SIZE: usize = 256 * 1024 * 1024;
 
@@ -99,14 +100,22 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
     println!("Load address: {:#010X}", config.load_address);
     println!("Entry point:  {:#010X}", config.entry);
 
-    let result = run(
-        &mut cpu,
-        &mut memory,
-        ExecutionConfig {
-            max_steps: config.max_steps,
-            stop_on_exception: config.stop_on_exception,
-        },
-    );
+    let execution_config = ExecutionConfig {
+        max_steps: config.max_steps,
+        stop_on_exception: config.stop_on_exception,
+    };
+
+    let result = if config.trace {
+        println!();
+        println!("Instruction Trace");
+        println!("-----------------");
+
+        run_with_trace(&mut cpu, &mut memory, execution_config, |event| {
+            print!("{}", trace::format_trace(event));
+        })
+    } else {
+        run(&mut cpu, &mut memory, execution_config)
+    };
 
     println!();
     println!("Execution finished");

@@ -12,6 +12,7 @@ pub struct CliConfig {
     pub dump_cp0: bool,
     pub dump_fpu: bool,
     pub dump_memory: Option<(u32, usize)>,
+    pub trace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,7 @@ Options:
     --dump-fpu                 Display floating-point registers
     --dump-memory <addr> <size>
                                Display physical memory contents
+    --trace                    Trace instruction execution
 
 Numbers may be decimal or hexadecimal (0x prefix).
 ";
@@ -79,6 +81,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     let mut dump_cp0 = false;
     let mut dump_fpu = false;
     let mut dump_memory = None;
+    let mut trace = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -144,6 +147,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
                 dump_memory = Some((address, size));
             }
 
+            "--trace" => {
+                trace = true;
+            }
+
             _ if arg.starts_with('-') => {
                 return Err(format!("unknown option: {arg}"));
             }
@@ -185,5 +192,6 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         dump_cp0,
         dump_fpu,
         dump_memory,
+        trace,
     }))
 }

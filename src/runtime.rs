@@ -1,5 +1,6 @@
 use crate::cpu::Cpu;
 use crate::memory::Memory;
+use crate::trace::{CpuSnapshot, TraceEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
@@ -35,6 +36,24 @@ pub struct ExecutionResult {
 }
 
 pub fn run(cpu: &mut Cpu, memory: &mut Memory, config: ExecutionConfig) -> ExecutionResult {
+    run_internal(cpu, memory, config, None)
+}
+
+pub fn run_with_trace(
+    cpu: &mut Cpu,
+    memory: &mut Memory,
+    config: ExecutionConfig,
+    mut callback: impl FnMut(&TraceEvent),
+) -> ExecutionResult {
+    run_internal(cpu, memory, config, Some(&mut callback))
+}
+
+fn run_internal(
+    cpu: &mut Cpu,
+    memory: &mut Memory,
+    config: ExecutionConfig,
+    mut callback: Option<&mut dyn FnMut(&TraceEvent)>,
+) -> ExecutionResult {
     let mut steps = 0;
 
     let reason = loop {
@@ -48,9 +67,17 @@ pub fn run(cpu: &mut Cpu, memory: &mut Memory, config: ExecutionConfig) -> Execu
 
         let previous_exception_count = cpu.exception_count();
 
+        let snapshot = callback.is_some().then(|| CpuSnapshot::capture(cpu));
+
         cpu.step(memory);
 
         steps += 1;
+
+        if let (Some(before), Some(callback)) = (snapshot, callback.as_mut()) {
+            let event = TraceEvent::capture(steps, &before, cpu);
+
+            callback(&event);
+        }
 
         if config.stop_on_exception && cpu.exception_count() != previous_exception_count {
             break StopReason::Exception {

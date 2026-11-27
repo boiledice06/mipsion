@@ -25,6 +25,7 @@ pub struct Cpu {
     reservation: Option<u32>,
     translation_mode: TranslationMode,
     exception_count: u64,
+    last_instruction: Option<u32>,
 }
 
 impl Cpu {
@@ -44,6 +45,7 @@ impl Cpu {
             reservation: None,
             translation_mode: TranslationMode::Bare,
             exception_count: 0,
+            last_instruction: None,
         }
     }
 
@@ -78,6 +80,8 @@ impl Cpu {
     }
 
     pub fn step(&mut self, memory: &mut Memory) {
+        self.last_instruction = None;
+
         if self.halted {
             return;
         }
@@ -106,6 +110,8 @@ impl Cpu {
         let Some(word) = self.fetch(memory) else {
             return;
         };
+
+        self.last_instruction = Some(word);
 
         let raw_inst = RawInstruction::new(word);
 
@@ -278,5 +284,9 @@ impl Cpu {
 
     pub fn exception_count(&self) -> u64 {
         self.exception_count
+    }
+
+    pub fn last_instruction(&self) -> Option<u32> {
+        self.last_instruction
     }
 }

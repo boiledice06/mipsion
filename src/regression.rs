@@ -9903,3 +9903,287 @@ fn inspection_memory_invalid_range() {
     assert!(dump_memory(&memory, 0, 0).is_err());
     assert!(dump_memory(&memory, u32::MAX, 4).is_err());
 }
+
+#[test]
+fn trace_last_instruction() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    memory.write_word(0, 0x2408_002A);
+
+    assert_eq!(cpu.last_instruction(), None);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.last_instruction(), Some(0x2408_002A),);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.last_instruction(), None);
+    assert_eq!(cpu.cp0().exception_code(), 6);
+}
+
+#[test]
+fn trace_register_change() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.step, 1);
+    assert_eq!(event.pc, 0);
+    assert_eq!(event.next_pc, 4);
+
+    assert_eq!(event.instruction, Some(0x2408_002A),);
+
+    assert_eq!(event.mnemonic, Some("addiu"));
+    assert_eq!(event.register_changes.len(), 1);
+
+    let change = event.register_changes[0];
+
+    assert_eq!(change.index, 8);
+    assert_eq!(change.before, 0);
+    assert_eq!(change.after, 42);
+    assert!(event.exception.is_none());
+}
+
+#[test]
+fn trace_unchanged_registers() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert!(event.register_changes.is_empty());
+    assert!(event.hi_change.is_none());
+    assert!(event.lo_change.is_none());
+}
+
+#[test]
+fn trace_hilo_changes() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.write_hi(0x1234);
+    cpu.write_lo(0x5678);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.hi_change.unwrap().before, 0);
+    assert_eq!(event.hi_change.unwrap().after, 0x1234);
+
+    assert_eq!(event.lo_change.unwrap().before, 0);
+    assert_eq!(event.lo_change.unwrap().after, 0x5678);
+}
+
+#[test]
+fn trace_syscall_exception() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, 0x0000_000C);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.mnemonic, Some("syscall"));
+    assert_eq!(event.next_pc, 0x8000_0180);
+
+    let exception = event.exception.unwrap();
+
+    assert_eq!(exception.code, 8);
+    assert_eq!(exception.epc, 0);
+    assert!(!exception.in_delay_slot);
+}
+
+#[test]
+fn trace_fetch_failure() {
+    use crate::trace::{CpuSnapshot, TraceEvent};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.write_pc(4);
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+
+    assert_eq!(event.instruction, None);
+    assert_eq!(event.mnemonic, None);
+    assert_eq!(event.exception.unwrap().code, 6);
+}
+
+#[test]
+fn trace_delay_slot_exception() {
+    use crate::runtime::{ExecutionConfig, run_with_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(4, 0, 0, 1));
+    memory.write_word(4, 0x0000_000C);
+
+    let mut events = Vec::new();
+
+    run_with_trace(&mut cpu, &mut memory, ExecutionConfig::default(), |event| {
+        events.push(event.clone())
+    });
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1].pc, 4);
+
+    let exception = events[1].exception.unwrap();
+
+    assert_eq!(exception.code, 8);
+    assert_eq!(exception.epc, 0);
+    assert!(exception.in_delay_slot);
+}
+
+#[test]
+fn runtime_trace_event_sequence() {
+    use crate::runtime::{ExecutionConfig, run_with_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+    memory.write_word(4, i(9, 8, 9, 1));
+    memory.write_word(8, 0x0000_000C);
+
+    let mut events = Vec::new();
+
+    let result = run_with_trace(&mut cpu, &mut memory, ExecutionConfig::default(), |event| {
+        events.push(event.clone())
+    });
+
+    assert_eq!(result.steps, 3);
+    assert_eq!(events.len(), 3);
+
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event.step, index as u64 + 1);
+        assert_eq!(event.pc, index as u32 * 4);
+    }
+
+    assert_eq!(cpu.read_reg(8), 42);
+    assert_eq!(cpu.read_reg(9), 43);
+    assert_eq!(events[2].exception.unwrap().code, 8);
+}
+
+#[test]
+fn runtime_trace_does_not_change_execution() {
+    use crate::runtime::{ExecutionConfig, run, run_with_trace};
+    use crate::trace::CpuSnapshot;
+
+    let mut normal_cpu = Cpu::new();
+    let mut traced_cpu = Cpu::new();
+
+    let mut normal_memory = Memory::new(128);
+    let mut traced_memory = Memory::new(128);
+
+    let words = [
+        i(9, 0, 8, 42),
+        i(9, 8, 9, 1),
+        i(0x2B, 0, 9, 64),
+        0x0000_000C,
+    ];
+
+    for (index, &word) in words.iter().enumerate() {
+        normal_memory.write_word(index as u32 * 4, word);
+        traced_memory.write_word(index as u32 * 4, word);
+    }
+
+    let config = ExecutionConfig::default();
+
+    let normal_result = run(&mut normal_cpu, &mut normal_memory, config);
+
+    let traced_result = run_with_trace(&mut traced_cpu, &mut traced_memory, config, |_| {});
+
+    assert_eq!(normal_result, traced_result);
+
+    assert_eq!(
+        CpuSnapshot::capture(&normal_cpu),
+        CpuSnapshot::capture(&traced_cpu),
+    );
+
+    assert_eq!(normal_cpu.cp0().read_cause(), traced_cpu.cp0().read_cause(),);
+
+    for address in 0..128 {
+        assert_eq!(
+            normal_memory.read_byte(address),
+            traced_memory.read_byte(address),
+        );
+    }
+}
+
+#[test]
+fn trace_output_format() {
+    use crate::trace::{CpuSnapshot, TraceEvent, format_trace};
+
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    memory.write_word(0, i(9, 0, 8, 42));
+
+    let before = CpuSnapshot::capture(&cpu);
+
+    cpu.step(&mut memory);
+
+    let event = TraceEvent::capture(1, &before, &cpu);
+    let output = format_trace(&event);
+
+    assert!(output.contains("[000001]"));
+    assert!(output.contains("PC=00000000"));
+    assert!(output.contains("2408002A"));
+    assert!(output.contains("addiu"));
+    assert!(output.contains("$t0: 00000000 -> 0000002A"));
+    assert!(output.contains("PC -> 00000004"));
+}
+
+#[test]
+fn cli_trace_default_disabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(!config.trace);
+}
+
+#[test]
+fn cli_trace_enabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin", "--trace"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(config.trace);
+}
