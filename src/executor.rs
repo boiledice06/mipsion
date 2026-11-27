@@ -11,6 +11,13 @@ use crate::exception::Exception;
 
 use crate::mmu::AccessType;
 
+use crate::fpu::{
+    RoundingMode, checked_single_to_double, checked_word_to_double, compare_double, compare_single,
+    convert_double_to_word, convert_single_to_word, flush_double_result, flush_single_result,
+    rounded_double, rounded_double_to_single, rounded_double_unary, rounded_single,
+    rounded_single_unary, rounded_word_to_single,
+};
+
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     // CP0 및 TLB 명령어 접근 권한 검사
     if matches!(
@@ -26,7 +33,16 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             | Operation::Tlbp
     ) && !cpu.cp0().cp0_accessible()
     {
-        cpu.raise_exception(Exception::CoprocessorUnusable, None);
+        cpu.raise_exception(Exception::CoprocessorUnusable(0), None);
+
+        return;
+    }
+    // CP1 및 COP1X 명령어 접근 권한 검사
+    let uses_cp1 = matches!(inst.opcode(), 0x11 | 0x13 | 0x31 | 0x35 | 0x39 | 0x3D)
+        || matches!(operation, Operation::Movf | Operation::Movt);
+
+    if uses_cp1 && !cpu.cp0().cp1_accessible() {
+        cpu.raise_exception(Exception::CoprocessorUnusable(1), None);
 
         return;
     }
@@ -309,6 +325,121 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.clear_reservation();
         }
 
+        Operation::Lwc1 | Operation::Swc1 => {
+            let base = inst.rs() as usize;
+            let ft = inst.ft() as usize;
+
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = cpu.read_reg(base).wrapping_add(offset);
+
+            let is_load = matches!(operation, Operation::Lwc1);
+
+            // Word alignment 검사
+            if address & 3 != 0 {
+                let exception = if is_load {
+                    Exception::AddressErrorLoad
+                } else {
+                    Exception::AddressErrorStore
+                };
+
+                cpu.raise_exception(exception, Some(address));
+
+                return;
+            }
+
+            // 가상 주소 → 물리 주소
+            let access = if is_load {
+                AccessType::Load
+            } else {
+                AccessType::Store
+            };
+
+            let Some(physical_address) = cpu.translate_address(address, access) else {
+                return;
+            };
+
+            match operation {
+                Operation::Lwc1 => {
+                    let value = memory.read_word(physical_address);
+
+                    cpu.cp1_mut().write_word(ft, value);
+                }
+
+                Operation::Swc1 => {
+                    let value = cpu.cp1().read_word(ft);
+
+                    memory.write_word(physical_address, value);
+
+                    cpu.clear_reservation();
+                }
+
+                _ => unreachable!(),
+            }
+        }
+
+        Operation::Ldc1 | Operation::Sdc1 => {
+            let base = inst.rs() as usize;
+            let ft = inst.ft() as usize;
+
+            let offset = inst.immediate() as i16 as i32 as u32;
+            let address = cpu.read_reg(base).wrapping_add(offset);
+
+            let is_load = matches!(operation, Operation::Ldc1);
+
+            // FR=0 doubleword register 검사
+            if !cpu.cp1().valid_double_register(ft) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            // Doubleword alignment 검사
+            if address & 7 != 0 {
+                let exception = if is_load {
+                    Exception::AddressErrorLoad
+                } else {
+                    Exception::AddressErrorStore
+                };
+
+                cpu.raise_exception(exception, Some(address));
+
+                return;
+            }
+
+            // 주소 변환
+            let access = if is_load {
+                AccessType::Load
+            } else {
+                AccessType::Store
+            };
+
+            let Some(physical_address) = cpu.translate_address(address, access) else {
+                return;
+            };
+
+            match operation {
+                Operation::Ldc1 => {
+                    let value = memory.read_doubleword(physical_address);
+
+                    cpu.cp1_mut().write_doubleword(ft, value);
+                }
+
+                Operation::Sdc1 => {
+                    let value = cpu
+                        .cp1()
+                        .read_doubleword(ft)
+                        .expect("validated doubleword register");
+
+                    memory.write_doubleword(physical_address, value);
+
+                    cpu.clear_reservation();
+                }
+
+                _ => unreachable!(),
+            }
+        }
+
         Operation::Lwl | Operation::Lwr => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
@@ -353,6 +484,22 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.clear_reservation();
+        }
+
+        Operation::Movf | Operation::Movt => {
+            let rs = inst.rs() as usize;
+            let rd = inst.rd() as usize;
+            let cc = inst.branch_cc();
+
+            let condition = cpu.cp1().read_fcc(cc);
+
+            let expected = matches!(operation, Operation::Movt);
+
+            if condition == expected {
+                let value = cpu.read_reg(rs);
+
+                cpu.write_reg(rd, value);
+            }
         }
 
         Operation::Movn | Operation::Movz => {
@@ -459,6 +606,31 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             if taken {
                 let offset = (inst.immediate() as i16 as i32) << 2;
+                let target = cpu.read_pc().wrapping_add(offset as u32);
+
+                cpu.write_next_pc(target);
+                cpu.mark_delay_slot();
+            } else if likely {
+                cpu.skip_delay_slot();
+            } else {
+                cpu.mark_delay_slot();
+            }
+        }
+
+        Operation::Bc1f | Operation::Bc1t | Operation::Bc1fl | Operation::Bc1tl => {
+            let cc = inst.branch_cc();
+
+            let condition = cpu.cp1().read_fcc(cc);
+
+            let expected = matches!(operation, Operation::Bc1t | Operation::Bc1tl);
+
+            let taken = condition == expected;
+
+            let likely = matches!(operation, Operation::Bc1fl | Operation::Bc1tl);
+
+            if taken {
+                let offset = (inst.immediate() as i16 as i32) << 2;
+
                 let target = cpu.read_pc().wrapping_add(offset as u32);
 
                 cpu.write_next_pc(target);
@@ -614,6 +786,470 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             };
 
             cpu.write_reg(rt, value);
+        }
+
+        Operation::Mfc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.cp1().read_word(fs);
+
+            cpu.write_reg(rt, value);
+        }
+
+        Operation::Mtc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.read_reg(rt);
+
+            cpu.cp1_mut().write_word(fs, value);
+        }
+
+        Operation::Mfhc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            match cpu.cp1().read_high_word(fs) {
+                Some(value) => {
+                    cpu.write_reg(rt, value);
+                }
+
+                None => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                }
+            }
+        }
+
+        Operation::Mthc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.read_reg(rt);
+
+            if !cpu.cp1_mut().write_high_word(fs, value) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+            }
+        }
+
+        Operation::AddS | Operation::SubS | Operation::MulS | Operation::DivS => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+            let fd = inst.fd() as usize;
+
+            let lhs = cpu.cp1().read_word(fs);
+            let rhs = cpu.cp1().read_word(ft);
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_single(operation, lhs, rhs, mode);
+
+            let result = flush_single_result(result, mode, cpu.cp1().flush_subnormals());
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
+        }
+
+        Operation::AbsS | Operation::MovS | Operation::NegS | Operation::SqrtS => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let operand = cpu.cp1().read_word(fs);
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_single_unary(operation, operand, mode);
+
+            let result = if matches!(operation, Operation::SqrtS) {
+                flush_single_result(result, mode, cpu.cp1().flush_subnormals())
+            } else {
+                result
+            };
+
+            if !matches!(operation, Operation::MovS)
+                && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
+            {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
+        }
+
+        Operation::AddD | Operation::SubD | Operation::MulD | Operation::DivD => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+            let fd = inst.fd() as usize;
+
+            // FR=0 doubleword register validation
+            if !cpu.cp1().valid_double_register(fs)
+                || !cpu.cp1().valid_double_register(ft)
+                || !cpu.cp1().valid_double_register(fd)
+            {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let lhs = cpu
+                .cp1()
+                .read_doubleword(fs)
+                .expect("validated source register");
+
+            let rhs = cpu
+                .cp1()
+                .read_doubleword(ft)
+                .expect("validated source register");
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_double(operation, lhs, rhs, mode);
+
+            let result = flush_double_result(result, mode, cpu.cp1().flush_subnormals());
+
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_doubleword(fd, result.value);
+        }
+
+        Operation::AbsD | Operation::MovD | Operation::NegD | Operation::SqrtD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            // FR=0 doubleword register validation
+            if !cpu.cp1().valid_double_register(fs) || !cpu.cp1().valid_double_register(fd) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let operand = cpu
+                .cp1()
+                .read_doubleword(fs)
+                .expect("validated source register");
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_double_unary(operation, operand, mode);
+
+            let result = if matches!(operation, Operation::SqrtD) {
+                flush_double_result(result, mode, cpu.cp1().flush_subnormals())
+            } else {
+                result
+            };
+
+            if !matches!(operation, Operation::MovD)
+                && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
+            {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_doubleword(fd, result.value);
+        }
+
+        Operation::CvtDS | Operation::CvtSD | Operation::CvtSW | Operation::CvtDW => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            match operation {
+                Operation::CvtDS | Operation::CvtDW => {
+                    if !cpu.cp1().valid_double_register(fd) {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    }
+
+                    let operand = cpu.cp1().read_word(fs);
+
+                    let result = match operation {
+                        Operation::CvtDS => checked_single_to_double(operand),
+
+                        Operation::CvtDW => checked_word_to_double(operand),
+
+                        _ => unreachable!(),
+                    };
+
+                    if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                        cpu.raise_exception(Exception::FloatingPoint, None);
+
+                        return;
+                    }
+
+                    cpu.cp1_mut().write_doubleword(fd, result.value);
+                }
+
+                Operation::CvtSD | Operation::CvtSW => {
+                    let result = match operation {
+                        Operation::CvtSD => {
+                            let Some(operand) = cpu.cp1().read_doubleword(fs) else {
+                                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                                return;
+                            };
+
+                            rounded_double_to_single(operand, mode)
+                        }
+
+                        Operation::CvtSW => {
+                            let operand = cpu.cp1().read_word(fs);
+
+                            rounded_word_to_single(operand, mode)
+                        }
+
+                        _ => unreachable!(),
+                    };
+
+                    let result = flush_single_result(result, mode, cpu.cp1().flush_subnormals());
+
+                    if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                        cpu.raise_exception(Exception::FloatingPoint, None);
+
+                        return;
+                    }
+
+                    cpu.cp1_mut().write_word(fd, result.value);
+                }
+
+                _ => unreachable!(),
+            }
+        }
+
+        Operation::CvtWS
+        | Operation::CvtWD
+        | Operation::RoundWS
+        | Operation::RoundWD
+        | Operation::TruncWS
+        | Operation::TruncWD
+        | Operation::CeilWS
+        | Operation::CeilWD
+        | Operation::FloorWS
+        | Operation::FloorWD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let mode = match operation {
+                Operation::CvtWS | Operation::CvtWD => {
+                    RoundingMode::from_fcsr(cpu.cp1().rounding_mode())
+                }
+
+                Operation::RoundWS | Operation::RoundWD => RoundingMode::NearestEven,
+
+                Operation::TruncWS | Operation::TruncWD => RoundingMode::TowardZero,
+
+                Operation::CeilWS | Operation::CeilWD => RoundingMode::TowardPositive,
+
+                Operation::FloorWS | Operation::FloorWD => RoundingMode::TowardNegative,
+
+                _ => unreachable!(),
+            };
+
+            let result = match operation {
+                Operation::CvtWS
+                | Operation::RoundWS
+                | Operation::TruncWS
+                | Operation::CeilWS
+                | Operation::FloorWS => {
+                    let operand = cpu.cp1().read_word(fs);
+
+                    convert_single_to_word(operand, mode)
+                }
+
+                Operation::CvtWD
+                | Operation::RoundWD
+                | Operation::TruncWD
+                | Operation::CeilWD
+                | Operation::FloorWD => {
+                    let Some(operand) = cpu.cp1().read_doubleword(fs) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    convert_double_to_word(operand, mode)
+                }
+
+                _ => unreachable!(),
+            };
+
+            let trap = cpu.cp1_mut().apply_fp_exceptions(result.exceptions);
+
+            if trap {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
+        }
+
+        Operation::CFS
+        | Operation::CUnS
+        | Operation::CEqS
+        | Operation::CUeqS
+        | Operation::COltS
+        | Operation::CUltS
+        | Operation::COleS
+        | Operation::CUleS
+        | Operation::CSfS
+        | Operation::CNgleS
+        | Operation::CSeqS
+        | Operation::CNglS
+        | Operation::CLtS
+        | Operation::CNgeS
+        | Operation::CLeS
+        | Operation::CNgtS
+        | Operation::CFD
+        | Operation::CUnD
+        | Operation::CEqD
+        | Operation::CUeqD
+        | Operation::COltD
+        | Operation::CUltD
+        | Operation::COleD
+        | Operation::CUleD
+        | Operation::CSfD
+        | Operation::CNgleD
+        | Operation::CSeqD
+        | Operation::CNglD
+        | Operation::CLtD
+        | Operation::CNgeD
+        | Operation::CLeD
+        | Operation::CNgtD => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+
+            let cc = inst.compare_cc();
+            let cond = inst.compare_cond();
+
+            let result = match inst.fmt() {
+                // Single precision
+                0x10 => {
+                    let lhs = cpu.cp1().read_word(fs);
+                    let rhs = cpu.cp1().read_word(ft);
+
+                    compare_single(lhs, rhs, cond)
+                }
+
+                // Double precision
+                0x11 => {
+                    let Some(lhs) = cpu.cp1().read_doubleword(fs) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    let Some(rhs) = cpu.cp1().read_doubleword(ft) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    compare_double(lhs, rhs, cond)
+                }
+
+                _ => unreachable!(),
+            };
+
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_fcc(cc, result.condition);
+        }
+
+        Operation::MovfS
+        | Operation::MovtS
+        | Operation::MovfD
+        | Operation::MovtD
+        | Operation::MovnS
+        | Operation::MovzS
+        | Operation::MovnD
+        | Operation::MovzD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let double = inst.fmt() == 0x11;
+
+            if double
+                && (!cpu.cp1().valid_double_register(fs) || !cpu.cp1().valid_double_register(fd))
+            {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let should_move = match operation {
+                Operation::MovfS | Operation::MovfD => !cpu.cp1().read_fcc(inst.branch_cc()),
+
+                Operation::MovtS | Operation::MovtD => cpu.cp1().read_fcc(inst.branch_cc()),
+
+                Operation::MovnS | Operation::MovnD => cpu.read_reg(inst.rt() as usize) != 0,
+
+                Operation::MovzS | Operation::MovzD => cpu.read_reg(inst.rt() as usize) == 0,
+
+                _ => unreachable!(),
+            };
+
+            if should_move {
+                if double {
+                    let value = cpu
+                        .cp1()
+                        .read_doubleword(fs)
+                        .expect("validated source register");
+
+                    cpu.cp1_mut().write_doubleword(fd, value);
+                } else {
+                    let value = cpu.cp1().read_word(fs);
+
+                    cpu.cp1_mut().write_word(fd, value);
+                }
+            }
+        }
+
+        Operation::Cfc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs();
+
+            match cpu.cp1().read_control(fs) {
+                Some(value) => {
+                    cpu.write_reg(rt, value);
+                }
+
+                None => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                }
+            }
+        }
+
+        Operation::Ctc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs();
+
+            let value = cpu.read_reg(rt);
+
+            if !cpu.cp1_mut().write_control(fs, value) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            if cpu.cp1().exception_requested() {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+            }
         }
 
         Operation::Mfc0 => {

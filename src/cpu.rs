@@ -5,6 +5,7 @@ use crate::executor::execute;
 use crate::instruction::RawInstruction;
 
 use crate::cp0::Cp0;
+use crate::cp1::Cp1;
 use crate::exception::Exception;
 
 use crate::mmu::{AccessType, Mmu, TranslationMode};
@@ -17,6 +18,7 @@ pub struct Cpu {
     lo: u32,      // 곱셈 하위 32비트, 나눗셈 몫
     halted: bool, // 에뮬레이터 실행 중단 여부
     cp0: Cp0,
+    cp1: Cp1,
     current_pc: u32,
     in_delay_slot: bool,
     next_delay_slot: bool,
@@ -34,6 +36,7 @@ impl Cpu {
             lo: 0,
             halted: false,
             cp0: Cp0::new(),
+            cp1: Cp1::new(),
             current_pc: 0,
             in_delay_slot: false,
             next_delay_slot: false,
@@ -163,6 +166,14 @@ impl Cpu {
 
     pub fn cp0_mut(&mut self) -> &mut Cp0 {
         &mut self.cp0
+    }
+
+    pub fn cp1(&self) -> &Cp1 {
+        &self.cp1
+    }
+
+    pub fn cp1_mut(&mut self) -> &mut Cp1 {
+        &mut self.cp1
     }
 
     pub fn mark_delay_slot(&mut self) {

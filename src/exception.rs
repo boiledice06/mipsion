@@ -11,9 +11,10 @@ pub enum Exception {
     Syscall,
     Breakpoint,
     ReservedInstruction,
-    CoprocessorUnusable,
+    CoprocessorUnusable(u8),
     Overflow,
     Trap,
+    FloatingPoint,
     MachineCheck,
 }
 
@@ -29,9 +30,10 @@ impl Exception {
             Self::Syscall => 8,
             Self::Breakpoint => 9,
             Self::ReservedInstruction => 10,
-            Self::CoprocessorUnusable => 11,
+            Self::CoprocessorUnusable(_) => 11,
             Self::Overflow => 12,
             Self::Trap => 13,
+            Self::FloatingPoint => 15,
             Self::MachineCheck => 24,
         }
     }

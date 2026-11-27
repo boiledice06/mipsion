@@ -27,6 +27,34 @@ impl RawInstruction {
         self.extract(11, 5) as u8
     }
 
+    pub fn fs(&self) -> u8 {
+        self.extract(11, 5) as u8
+    }
+
+    pub fn ft(&self) -> u8 {
+        self.extract(16, 5) as u8
+    }
+
+    pub fn fd(&self) -> u8 {
+        self.extract(6, 5) as u8
+    }
+
+    pub fn fmt(&self) -> u8 {
+        self.extract(21, 5) as u8
+    }
+
+    pub fn compare_cc(&self) -> u8 {
+        self.extract(8, 3) as u8
+    }
+
+    pub fn branch_cc(&self) -> u8 {
+        self.extract(18, 3) as u8
+    }
+
+    pub fn compare_cond(&self) -> u8 {
+        self.extract(0, 4) as u8
+    }
+
     pub fn shamt(&self) -> u8 {
         self.extract(6, 5) as u8
     }

@@ -22,16 +22,17 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.2.0 — System Control Core
+v0.3.0 — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 114 / 291 (39.18%) |
+| ISA entries with execution logic | 200 / 291 (68.73%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
+| Basic FPU instruction execution paths | 86 / 86 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 46 |
-| Pending | 177 |
-| Regression tests | 145 / 145 passing |
+| Partially implemented | 132 |
+| Pending | 91 |
+| Regression tests | 386 / 386 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -57,7 +58,38 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] TLB refill, invalid and modified exceptions
 - [x] CPU configuration registers
 - [ ] Full system-control conformance
-- [ ] Floating-point unit
+- [x] CP1 register file and access control
+- [x] FPU control registers and basic exception entry
+- [x] FR=0 doubleword register mapping
+- [x] GPR/FPR and word/doubleword memory transfers
+- [x] Basic single-precision arithmetic
+- [x] Basic double-precision arithmetic
+- [x] Basic S/D/W format conversions
+- [x] FCSR rounding modes for CVT.W instructions
+- [x] Invalid/Inexact exception handling for CVT.W instructions
+- [x] Explicit word rounding instructions (ROUND/TRUNC/CEIL/FLOOR)
+- [x] All 32 single/double comparison instructions
+- [x] FCC0–7 condition code access
+- [x] Legacy NaN classification for comparisons
+- [x] Floating-point conditional branches
+- [x] Floating-point conditional moves
+- [x] Execution paths for all 86 basic FPU instructions
+- [x] Legacy NaN normalization for arithmetic
+- [x] Basic Invalid and Divide-by-Zero exception handling
+- [x] Basic Overflow, Underflow and Inexact detection for S/D arithmetic
+- [x] Integer-based exactness checks for double-precision arithmetic
+- [x] Arithmetic exception traps and destination writeback suppression
+- [x] All four FCSR rounding modes for S/D arithmetic
+- [x] Directed rounding for narrowing format conversions
+- [x] Legacy NaN and exception handling for format conversions
+- [x] Exact dyadic comparison using fixed-size integer accumulators
+- [x] CP0 Config1.FP and CP1 FIR feature advertisement
+- [x] Basic FCSR.FS result flushing for S/D arithmetic
+- [x] FCSR Cause/Enable exhaustive mask testing
+- [x] Unimplemented Operation exception request handling
+- [x] FP exception delivery in branch delay slots
+- [x] Sticky Flag and architectural state preservation
+- [ ] Full floating-point conformance
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
 - [ ] Five-stage pipeline simulation
@@ -76,8 +108,10 @@ The functional emulation core is designed independently of the user interface.
 - `isa` — instruction definitions and operation types generated at build time
 - `decoder` — table-driven instruction identification
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
+- `fpu` — floating-point arithmetic, format conversion, rounding, comparison and exception results
 - `executor` — instruction semantics and control flow
 - `cp0` — system registers, privilege, exceptions and interrupts
+- `cp1` — floating-point registers, control registers and data transfers
 - `mmu` — address translation and segment permissions
 - `tlb` — software-managed translation lookaside buffer
 - `exception` — architectural exception codes
@@ -103,7 +137,20 @@ The current core is exercised through regression tests. A standalone program loa
 - Physical memory bounds and bus errors remain incomplete.
 - CP0, TLB and exception behavior cover a limited architecture profile.
 - Cache behavior, execution hazards and full synchronization semantics are incomplete.
-- Floating-point instructions and optional coprocessors are not implemented.
+- FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers, basic single- and double-precision arithmetic, and S/D/W format conversions.
+- FCSR rounding and Invalid/Inexact exception handling are implemented for CVT.W and explicit word rounding instructions.
+- Comparisons support legacy NaN classification and Invalid Operation handling.
+- All 86 basic FPU instructions have execution paths.
+- Basic detection of all five IEEE 754 arithmetic exceptions is available for single- and double-precision arithmetic.
+- Arithmetic supports all four rounding modes through native nearest-even results and exact-result comparisons.
+- Narrowing format conversions support directed rounding and basic range exception detection.
+- Basic FCSR.FS result flushing is implemented.
+- Full FS semantics, tininess boundary cases, exception priority and IEEE 754 conformance remain incomplete.
+- Independent reference-FPU differential testing remains pending.
+- Config1.FP and FIR advertise the implemented S/D/W profile.
+- FR=1, optional formats and full exception conformance remain incomplete.
+- Unimplemented Operation request handling is supported, but complete architectural trigger conditions remain pending.
+- Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.
 
 ## Goals

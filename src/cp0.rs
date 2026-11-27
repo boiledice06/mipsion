@@ -5,7 +5,9 @@ pub const TLB_SIZE: usize = 32;
 
 const CONFIG_RESET: u32 = (1 << 31) | (1 << 10) | (1 << 7) | 2;
 
-const CONFIG1: u32 = ((TLB_SIZE - 1) as u32) << 25;
+const CONFIG1_FP: u32 = 1 << 0;
+
+const CONFIG1: u32 = (((TLB_SIZE - 1) as u32) << 25) | CONFIG1_FP;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeMode {
@@ -117,8 +119,9 @@ impl Cp0 {
         self.cause |= exception.code() << 2;
 
         // CP0 Unusable Exception의 Coprocessor 번호
-        if exception == Exception::CoprocessorUnusable {
+        if let Exception::CoprocessorUnusable(number) = exception {
             self.cause &= !(0b11 << 28);
+            self.cause |= (u32::from(number) & 0b11) << 28;
         }
 
         self.status |= 1 << 1;
@@ -216,7 +219,7 @@ impl Cp0 {
 
             (12, 0) => {
                 // 기본 System Control 비트만 허용
-                const MASK: u32 = 0x1040_FF1F;
+                const MASK: u32 = 0x3040_FF1F;
 
                 self.status = (self.status & !MASK) | (value & MASK);
             }
@@ -379,6 +382,14 @@ impl Cp0 {
 
     pub fn cp0_accessible(&self) -> bool {
         self.is_kernel_mode() || self.status & (1 << 28) != 0
+    }
+
+    pub fn cp1_accessible(&self) -> bool {
+        self.status & (1 << 29) != 0
+    }
+
+    pub fn coprocessor_error(&self) -> u32 {
+        (self.cause >> 28) & 0b11
     }
 
     pub fn hardware_register_accessible(&self, rd: u8) -> bool {
