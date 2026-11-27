@@ -27,6 +27,14 @@ impl RawInstruction {
         self.extract(11, 5) as u8
     }
 
+    pub fn fs(&self) -> u8 {
+        self.extract(11, 5) as u8
+    }
+
+    pub fn ft(&self) -> u8 {
+        self.extract(16, 5) as u8
+    }
+
     pub fn shamt(&self) -> u8 {
         self.extract(6, 5) as u8
     }

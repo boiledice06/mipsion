@@ -26,7 +26,16 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             | Operation::Tlbp
     ) && !cpu.cp0().cp0_accessible()
     {
-        cpu.raise_exception(Exception::CoprocessorUnusable, None);
+        cpu.raise_exception(Exception::CoprocessorUnusable(0), None);
+
+        return;
+    }
+    // CP1 및 COP1X 명령어 접근 권한 검사
+    let uses_cp1 = matches!(inst.opcode(), 0x11 | 0x13 | 0x31 | 0x35 | 0x39 | 0x3D)
+        || matches!(operation, Operation::Movf | Operation::Movt);
+
+    if uses_cp1 && !cpu.cp0().cp1_accessible() {
+        cpu.raise_exception(Exception::CoprocessorUnusable(1), None);
 
         return;
     }
@@ -307,6 +316,59 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.clear_reservation();
+        }
+
+        Operation::Lwc1 | Operation::Swc1 => {
+            let base = inst.rs() as usize;
+            let ft = inst.ft() as usize;
+
+            let offset = inst.immediate() as i16 as i32 as u32;
+
+            let address = cpu.read_reg(base).wrapping_add(offset);
+
+            let is_load = matches!(operation, Operation::Lwc1);
+
+            // Word alignment 검사
+            if address & 3 != 0 {
+                let exception = if is_load {
+                    Exception::AddressErrorLoad
+                } else {
+                    Exception::AddressErrorStore
+                };
+
+                cpu.raise_exception(exception, Some(address));
+
+                return;
+            }
+
+            // 가상 주소 → 물리 주소
+            let access = if is_load {
+                AccessType::Load
+            } else {
+                AccessType::Store
+            };
+
+            let Some(physical_address) = cpu.translate_address(address, access) else {
+                return;
+            };
+
+            match operation {
+                Operation::Lwc1 => {
+                    let value = memory.read_word(physical_address);
+
+                    cpu.cp1_mut().write_word(ft, value);
+                }
+
+                Operation::Swc1 => {
+                    let value = cpu.cp1().read_word(ft);
+
+                    memory.write_word(physical_address, value);
+
+                    cpu.clear_reservation();
+                }
+
+                _ => unreachable!(),
+            }
         }
 
         Operation::Lwl | Operation::Lwr => {
@@ -614,6 +676,82 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             };
 
             cpu.write_reg(rt, value);
+        }
+
+        Operation::Mfc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.cp1().read_word(fs);
+
+            cpu.write_reg(rt, value);
+        }
+
+        Operation::Mtc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.read_reg(rt);
+
+            cpu.cp1_mut().write_word(fs, value);
+        }
+
+        Operation::Mfhc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            match cpu.cp1().read_high_word(fs) {
+                Some(value) => {
+                    cpu.write_reg(rt, value);
+                }
+
+                None => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                }
+            }
+        }
+
+        Operation::Mthc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs() as usize;
+
+            let value = cpu.read_reg(rt);
+
+            if !cpu.cp1_mut().write_high_word(fs, value) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+            }
+        }
+
+        Operation::Cfc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs();
+
+            match cpu.cp1().read_control(fs) {
+                Some(value) => {
+                    cpu.write_reg(rt, value);
+                }
+
+                None => {
+                    cpu.raise_exception(Exception::ReservedInstruction, None);
+                }
+            }
+        }
+
+        Operation::Ctc1 => {
+            let rt = inst.rt() as usize;
+            let fs = inst.fs();
+
+            let value = cpu.read_reg(rt);
+
+            if !cpu.cp1_mut().write_control(fs, value) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            if cpu.cp1().exception_requested() {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+            }
         }
 
         Operation::Mfc0 => {

@@ -11,6 +11,7 @@ mod mmu;
 mod tlb;
 
 mod cp0;
+mod cp1;
 mod exception;
 
 #[cfg(test)]

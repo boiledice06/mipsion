@@ -29,20 +29,22 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 114/291개(39.18%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 46개, 대기 177개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 145/145 통과했다.
+현재 실행 경로는 122/291개(41.92%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 54개, 대기 169개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 193/193 통과했다.
 
 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
 | 실행 상태 | 수 | 비율 |
 | --- | ---: | ---: |
 | 구현 | 68 | 23.37% |
-| 부분 | 46 | 15.81% |
-| 대기 | 177 | 60.82% |
-| 실행 경로 합계 | 114 | 39.18% |
+| 부분 | 54 | 18.56% |
+| 대기 | 169 | 58.08% |
+| 실행 경로 합계 | 122 | 41.92% |
 
 v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, timer/software interrupt, MMU, 32-entry TLB 및 TLB refill을 지원한다.
 
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
+
+v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, FPU 제어 레지스터, FR=0 doubleword register mapping 및 GPR/FPR/Memory 간 word 전송을 지원한다.
 
 ## 작업 순서
 
@@ -157,12 +159,12 @@ Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB
 | `CEIL.L.S` | FPU 64 | 대기 | 대기 | `0x11` | `0x0A` | `0xFFFF003F` | `0x4600000A` | `fd, fs` | +∞ 방향 반올림으로 L signed 정수 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 97 |
 | `CEIL.W.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x0E` | `0xFFFF003F` | `0x4620000E` | `fd, fs` | +∞ 방향 반올림으로 W signed 정수 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 98 |
 | `CEIL.W.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x0E` | `0xFFFF003F` | `0x4600000E` | `fd, fs` | +∞ 방향 반올림으로 W signed 정수 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 98 |
-| `CFC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44400000` | `rt, fs` | CP1 control register → rt | Coprocessor Unusable, Reserved Instruction | 99 |
+| `CFC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44400000` | `rt, fs` | CP1 control register → rt | Coprocessor Unusable, Reserved Instruction | 99 |
 | `CFC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48400000` | `rt, rd` (예시) | CP2 control register → rt | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없으면 UNPREDICTABLE | 100 |
 | `CLO` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x21` | `0xFC0007FF` | `0x70000021` | `rd, rs` | 상위부터 연속된 1의 개수 | rt와 rd 불일치 시 UNPREDICTABLE | 101 |
 | `CLZ` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x20` | `0xFC0007FF` | `0x70000020` | `rd, rs` | 상위부터 연속된 0의 개수 | rt와 rd 불일치 시 UNPREDICTABLE | 102 |
 | `COP2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFE000000` | `0x4A000000` | `func` | 구현 정의 cofun을 CP2에 전달 | Coprocessor Unusable, Reserved Instruction | 103 |
-| `CTC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44C00000` | `rt, fs` | CP1 rt → control register | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Division-by-zero, Inexact, Overflow, Underflow | 104 |
+| `CTC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44C00000` | `rt, fs` | CP1 rt → control register | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Division-by-zero, Inexact, Overflow, Underflow | 104 |
 | `CTC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48C00000` | `rt, rd` (예시) | CP2 rt → control register | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없으면 UNPREDICTABLE | 106 |
 | `CVT.D.L` | FPU 64 | 대기 | 대기 | `0x11` | `0x21` | `0xFFFF003F` | `0x46A00021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
 | `CVT.D.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x21` | `0xFFFF003F` | `0x46000021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
@@ -210,7 +212,7 @@ Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB
 | `LUI` | CPU 필수 | 구현 | 회귀 통과 | `0x0F` | — | `0xFFE00000` | `0x3C000000` | `rt, immediate` | immediate를 상위 16비트에 기록하고 하위 16비트를 0으로 설정 | — | 146 |
 | `LUXC1` | FPU 64 | 대기 | 대기 | `0x13` | `0x05` | `0xFC00F83F` | `0x4C000005` | `fd, index(base)` | base + index를 8바이트 경계로 내림한 주소의 doubleword를 FPR에 기록 load | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, Watch | 147 |
 | `LW` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x23` | — | `0xFC000000` | `0x8C000000` | `rt, offset(base)` | word load | TLB Refill, TLB Invalid, Bus Error, Address Error, Watch | 148 |
-| `LWC1` | FPU 기본 | 대기 | 대기 | `0x31` | — | `0xFC000000` | `0xC4000000` | `ft, offset(base)` | word를 FPR에 기록 load | TLB Refill, TLB Invalid, Address Error, Reserved Instruction, Coprocessor Unusable, Watch | 149 |
+| `LWC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x31` | — | `0xFC000000` | `0xC4000000` | `ft, offset(base)` | word를 FPR에 기록 load | TLB Refill, TLB Invalid, Address Error, Reserved Instruction, Coprocessor Unusable, Watch | 149 |
 | `LWC2` | CP2 | 대기 | 대기 | `0x32` | — | `0xFC000000` | `0xC8000000` | `rt, offset(base)` | word를 CP2에 기록 load | TLB Refill, TLB Invalid, Address Error, Reserved Instruction, Coprocessor Unusable, Watch | 150 |
 | `LWL` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x22` | — | `0xFC000000` | `0x88000000` | `rt, offset(base)` | word의 상위 쪽 부분을 rt에 병합 load | TLB Refill, TLB Invalid, Bus Error, Address Error, Watch | 151 |
 | `LWR` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x26` | — | `0xFC000000` | `0x98000000` | `rt, offset(base)` | word의 하위 쪽 부분을 rt에 병합 load | TLB Refill, TLB Invalid, Bus Error, Address Error, Watch | 153 |
@@ -221,9 +223,9 @@ Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB
 | `MADD.S` | FPU 64 | 대기 | 대기 | `0x13` | `0x20` | `0xFC00003F` | `0x4C000020` | `fd, fr, fs, ft` | fs × ft + fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 157 |
 | `MADDU` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x01` | `0xFC00FFFF` | `0x70000001` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에 더함 | — | 158 |
 | `MFC0` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE007F8` | `0x40000000` | `rt, rd[, sel]` | CP0[rd, sel]을 rt로 이동 | Coprocessor Unusable, Reserved Instruction | 159 |
-| `MFC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44000000` | `rt, fs` | FPR 하위 word → rt | Coprocessor Unusable, Reserved Instruction | 160 |
+| `MFC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44000000` | `rt, fs` | FPR 하위 word → rt | Coprocessor Unusable, Reserved Instruction | 160 |
 | `MFC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48000000` | `rt, rd[, sel]` (예시) | CP2 register 하위 word → rt | Coprocessor Unusable. Impl의 register가 없으면 UNPREDICTABLE | 161 |
-| `MFHC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44600000` | `rt, fs` | FPR 상위 word → rt | Coprocessor Unusable, Reserved Instruction | 162 |
+| `MFHC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44600000` | `rt, fs` | FPR 상위 word → rt | Coprocessor Unusable, Reserved Instruction | 162 |
 | `MFHC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48600000` | `rt, rd[, sel]` (예시) | CP2 register 상위 word → rt | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없거나 64-bit가 아니면 UNPREDICTABLE | 163 |
 | `MFHI` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x10` | `0xFFFF07FF` | `0x00000010` | `rd` | HI를 rd로 이동 | — | 164 |
 | `MFLO` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x12` | `0xFFFF07FF` | `0x00000012` | `rd` | LO를 rd로 이동 | — | 165 |
@@ -252,9 +254,9 @@ Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB
 | `MSUB.S` | FPU 64 | 대기 | 대기 | `0x13` | `0x28` | `0xFC00003F` | `0x4C000028` | `fd, fr, fs, ft` | fs × ft − fr. 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 176 |
 | `MSUBU` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x05` | `0xFC00FFFF` | `0x70000005` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에서 뺌 | — | 177 |
 | `MTC0` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE007F8` | `0x40800000` | `rt, rd[, sel]` | rt를 CP0[rd, sel]로 이동 | Coprocessor Unusable, Reserved Instruction | 178 |
-| `MTC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44800000` | `rt, fs` | FPR rt → 하위 word | Coprocessor Unusable | 179 |
+| `MTC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44800000` | `rt, fs` | FPR rt → 하위 word | Coprocessor Unusable | 179 |
 | `MTC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48800000` | `rt, rd[, sel]` (예시) | CP2 register rt → 하위 word | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없으면 UNPREDICTABLE | 180 |
-| `MTHC1` | FPU 기본 | 대기 | 대기 | `0x11` | — | `0xFFE007FF` | `0x44E00000` | `rt, fs` | FPR rt → 상위 word | Coprocessor Unusable, Reserved Instruction | 181 |
+| `MTHC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44E00000` | `rt, fs` | FPR rt → 상위 word | Coprocessor Unusable, Reserved Instruction | 181 |
 | `MTHC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48E00000` | `rt, rd[, sel]` (예시) | CP2 register rt → 상위 word | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없거나 64-bit가 아니면 UNPREDICTABLE | 182 |
 | `MTHI` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x11` | `0xFC1FFFFF` | `0x00000011` | `rs` | rs를 HI로 이동 | — | 183 |
 | `MTLO` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x13` | `0xFC1FFFFF` | `0x00000013` | `rs` | rs를 LO로 이동 | — | 184 |
@@ -325,7 +327,7 @@ Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB
 | `SUBU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x23` | `0xFC0007FF` | `0x00000023` | `rd, rs, rt` | modulo 2³² 뺄셈 | — | 240 |
 | `SUXC1` | FPU 64 | 대기 | 대기 | `0x13` | `0x0D` | `0xFC0007FF` | `0x4C00000D` | `fs, index(base)` | base + index를 8바이트 경계로 내림한 주소에 FPR doubleword store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Watch | 241 |
 | `SW` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x2B` | — | `0xFC000000` | `0xAC000000` | `rt, offset(base)` | word store | TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 242 |
-| `SWC1` | FPU 기본 | 대기 | 대기 | `0x39` | — | `0xFC000000` | `0xE4000000` | `ft, offset(base)` | FPR의 word store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 243 |
+| `SWC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x39` | — | `0xFC000000` | `0xE4000000` | `ft, offset(base)` | FPR의 word store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 243 |
 | `SWC2` | CP2 | 대기 | 대기 | `0x3A` | — | `0xFC000000` | `0xE8000000` | `rt, offset(base)` | CP2의 word store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 244 |
 | `SWL` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x2A` | — | `0xFC000000` | `0xA8000000` | `rt, offset(base)` | rt 상위 쪽의 부분 word store | TLB Refill, TLB Invalid, TLB Modified, Bus Error, Address Error , Watch | 245 |
 | `SWR` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x2E` | — | `0xFC000000` | `0xB8000000` | `rt, offset(base)` | rt 하위 쪽의 부분 word store | TLB Refill, TLB Invalid, TLB Modified, Bus Error, Address Error, Watch | 247 |

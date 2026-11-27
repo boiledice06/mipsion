@@ -22,16 +22,16 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.2.0 — System Control Core
+v0.3.0 (in development) — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 114 / 291 (39.18%) |
+| ISA entries with execution logic | 122 / 291 (41.92%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 46 |
-| Pending | 177 |
-| Regression tests | 145 / 145 passing |
+| Partially implemented | 54 |
+| Pending | 169 |
+| Regression tests | 193 / 193 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -57,6 +57,10 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] TLB refill, invalid and modified exceptions
 - [x] CPU configuration registers
 - [ ] Full system-control conformance
+- [x] CP1 register file and access control
+- [x] FPU control registers and basic exception entry
+- [x] FR=0 doubleword register mapping
+- [x] GPR/FPR and word memory transfers
 - [ ] Floating-point unit
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -78,6 +82,7 @@ The functional emulation core is designed independently of the user interface.
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
 - `executor` — instruction semantics and control flow
 - `cp0` — system registers, privilege, exceptions and interrupts
+- `cp1` — floating-point registers, control registers and data transfers
 - `mmu` — address translation and segment permissions
 - `tlb` — software-managed translation lookaside buffer
 - `exception` — architectural exception codes
@@ -103,7 +108,10 @@ The current core is exercised through regression tests. A standalone program loa
 - Physical memory bounds and bus errors remain incomplete.
 - CP0, TLB and exception behavior cover a limited architecture profile.
 - Cache behavior, execution hazards and full synchronization semantics are incomplete.
-- Floating-point instructions and optional coprocessors are not implemented.
+- FPU support is limited to FR=0 register mapping, control registers and basic data transfers.
+- Floating-point arithmetic, full IEEE 754 semantics and extended FPU instructions remain incomplete.
+- CP1 feature advertisement and full exception conformance remain incomplete.
+- Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.
 
 ## Goals
