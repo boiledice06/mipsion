@@ -32,7 +32,7 @@ v0.3.0 (in development) — Floating-Point Unit
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Regression tests | 322 / 322 passing |
+| Regression tests | 343 / 343 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -74,6 +74,11 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Floating-point conditional branches
 - [x] Floating-point conditional moves
 - [x] Execution paths for all 86 basic FPU instructions
+- [x] Legacy NaN normalization for arithmetic
+- [x] Basic Invalid and Divide-by-Zero exception handling
+- [x] Basic Overflow, Underflow and Inexact detection for S/D arithmetic
+- [x] Integer-based exactness checks for double-precision arithmetic
+- [x] Arithmetic exception traps and destination writeback suppression
 - [ ] Full floating-point conformance
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -126,7 +131,9 @@ The current core is exercised through regression tests. A standalone program loa
 - FCSR rounding and Invalid/Inexact exception handling are implemented for CVT.W and explicit word rounding instructions.
 - Comparisons support legacy NaN classification and Invalid Operation handling.
 - All 86 basic FPU instructions have execution paths.
-- Full FCSR rounding, arithmetic exception semantics, subnormal handling and IEEE 754 conformance remain incomplete.
+- Basic detection of all five IEEE 754 arithmetic exceptions is available for single- and double-precision arithmetic.
+- Arithmetic currently uses native nearest-even results with simplified tininess detection.
+- Full FCSR rounding, FS behavior, exception priority and IEEE 754 conformance remain incomplete.
 - CP1 feature advertisement and full exception conformance remain incomplete.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.

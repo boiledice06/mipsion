@@ -6848,3 +6848,608 @@ fn cp1_conditional_move_integration() {
     assert_eq!(cpu.read_pc(), 28);
     assert!(!cpu.cp0().exception_level());
 }
+
+#[test]
+fn fpu_arithmetic_invalid_single() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs) in [
+        (Operation::AddS, f32::INFINITY, f32::NEG_INFINITY),
+        (Operation::SubS, f32::INFINITY, f32::INFINITY),
+        (Operation::MulS, 0.0, f32::INFINITY),
+        (Operation::DivS, 0.0, 0.0),
+        (Operation::DivS, f32::INFINITY, f32::INFINITY),
+    ] {
+        let result = checked_single(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_SINGLE);
+        assert_eq!(result.exceptions, FP_INVALID);
+    }
+}
+
+#[test]
+fn fpu_arithmetic_invalid_double() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs) in [
+        (Operation::AddD, f64::INFINITY, f64::NEG_INFINITY),
+        (Operation::SubD, f64::INFINITY, f64::INFINITY),
+        (Operation::MulD, 0.0, f64::INFINITY),
+        (Operation::DivD, 0.0, 0.0),
+        (Operation::DivD, f64::INFINITY, f64::INFINITY),
+    ] {
+        let result = checked_double(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_DOUBLE);
+        assert_eq!(result.exceptions, FP_INVALID);
+    }
+}
+
+#[test]
+fn fpu_arithmetic_divide_by_zero() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (lhs, rhs, negative) in [
+        (1.0f64, 0.0f64, false),
+        (1.0, -0.0, true),
+        (-1.0, 0.0, true),
+        (-1.0, -0.0, false),
+    ] {
+        let single = checked_single(
+            &Operation::DivS,
+            (lhs as f32).to_bits(),
+            (rhs as f32).to_bits(),
+        );
+
+        let double = checked_double(&Operation::DivD, lhs.to_bits(), rhs.to_bits());
+
+        let expected_single = if negative {
+            f32::NEG_INFINITY
+        } else {
+            f32::INFINITY
+        };
+
+        let expected_double = if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+
+        assert_eq!(single.value, expected_single.to_bits(),);
+
+        assert_eq!(double.value, expected_double.to_bits(),);
+
+        assert_eq!(single.exceptions, FP_DIVIDE_BY_ZERO,);
+
+        assert_eq!(double.exceptions, FP_DIVIDE_BY_ZERO,);
+    }
+}
+
+#[test]
+fn fpu_arithmetic_legacy_nan() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (bits, exceptions) in [(0x7FBF_FFFFu32, 0), (0x7FC0_0000, FP_INVALID)] {
+        let result = checked_single(&Operation::AddS, bits, 1.0f32.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_SINGLE);
+        assert_eq!(result.exceptions, exceptions);
+    }
+
+    for (bits, exceptions) in [
+        (0x7FF7_FFFF_FFFF_FFFFu64, 0),
+        (0x7FF8_0000_0000_0000, FP_INVALID),
+    ] {
+        let result = checked_double(&Operation::MulD, bits, 1.0f64.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_DOUBLE);
+        assert_eq!(result.exceptions, exceptions);
+    }
+}
+
+#[test]
+fn fpu_sqrt_special_values() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for value in [-1.0f32, f32::NEG_INFINITY] {
+        let result = checked_single_unary(&Operation::SqrtS, value.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_SINGLE);
+        assert_eq!(result.exceptions, FP_INVALID);
+    }
+
+    for value in [-1.0f64, f64::NEG_INFINITY] {
+        let result = checked_double_unary(&Operation::SqrtD, value.to_bits());
+
+        assert_eq!(result.value, LEGACY_QNAN_DOUBLE);
+        assert_eq!(result.exceptions, FP_INVALID);
+    }
+
+    for value in [0.0f32, -0.0, f32::INFINITY] {
+        let result = checked_single_unary(&Operation::SqrtS, value.to_bits());
+
+        assert_eq!(result.value, value.to_bits());
+        assert_eq!(result.exceptions, 0);
+    }
+
+    for value in [0.0f64, -0.0, f64::INFINITY] {
+        let result = checked_double_unary(&Operation::SqrtD, value.to_bits());
+
+        assert_eq!(result.value, value.to_bits());
+        assert_eq!(result.exceptions, 0);
+    }
+}
+
+#[test]
+fn cp1_arithmetic_exception_flags() {
+    for fmt in [0x10, 0x11] {
+        for invalid in [false, true] {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            let lhs = if invalid { 0.0f64 } else { 1.0 };
+
+            if fmt == 0x10 {
+                cpu.cp1_mut().write_word(2, (lhs as f32).to_bits());
+            } else {
+                cpu.cp1_mut().write_doubleword(2, lhs.to_bits());
+            }
+
+            // DIV.S / DIV.D
+            memory.write_word(0, encode_r(0x11, fmt, 4, 2, 6, 3));
+
+            cpu.step(&mut memory);
+
+            let expected_fcsr = if invalid {
+                (1 << 16) | (1 << 6)
+            } else {
+                (1 << 15) | (1 << 5)
+            };
+
+            assert_eq!(cpu.cp1().read_fcsr(), expected_fcsr,);
+
+            if fmt == 0x10 {
+                let expected = if invalid {
+                    0x7FBF_FFFF
+                } else {
+                    f32::INFINITY.to_bits()
+                };
+
+                assert_eq!(cpu.cp1().read_word(6), expected,);
+            } else {
+                let expected = if invalid {
+                    0x7FF7_FFFF_FFFF_FFFF
+                } else {
+                    f64::INFINITY.to_bits()
+                };
+
+                assert_eq!(cpu.cp1().read_doubleword(6), Some(expected),);
+            }
+
+            assert!(!cpu.cp0().exception_level());
+        }
+    }
+}
+
+#[test]
+fn cp1_arithmetic_exception_trap() {
+    for fmt in [0x10, 0x11] {
+        for (lhs, enable, cause) in [(0.0f64, 1 << 11, 1 << 16), (1.0f64, 1 << 10, 1 << 15)] {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            cpu.cp1_mut().write_control(31, enable);
+
+            if fmt == 0x10 {
+                cpu.cp1_mut().write_word(2, (lhs as f32).to_bits());
+            } else {
+                cpu.cp1_mut().write_doubleword(2, lhs.to_bits());
+            }
+
+            let sentinel = 0x1234_5678_DEAD_BEEFu64;
+
+            cpu.cp1_mut().write_doubleword(6, sentinel);
+
+            memory.write_word(0, encode_r(0x11, fmt, 4, 2, 6, 3));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp0().exception_code(), 15);
+            assert_eq!(cpu.cp0().read_epc(), 0);
+
+            assert_eq!(cpu.cp1().read_doubleword(6), Some(sentinel),);
+
+            assert_eq!(cpu.cp1().read_fcsr(), enable | cause,);
+        }
+    }
+}
+
+#[test]
+fn cp1_arithmetic_cause_and_move_preservation() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(12);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.0f32.to_bits());
+
+    let program = [
+        // DIV.S $f6, $f2, $f4
+        // Divide by zero
+        encode_r(0x11, 0x10, 4, 2, 6, 3),
+        // MOV.S $f8, $f6
+        encode_r(0x11, 0x10, 0, 6, 8, 6),
+        // ADD.S $f10, $f2, $f2
+        encode_r(0x11, 0x10, 2, 2, 10, 0),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_fcsr(), (1 << 15) | (1 << 5),);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_fcsr(), (1 << 15) | (1 << 5),);
+
+    assert_eq!(cpu.cp1().read_word(8), f32::INFINITY.to_bits(),);
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_fcsr(), 1 << 5,);
+
+    assert_eq!(cpu.cp1().read_word(10), 2.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_single_overflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for operation in [Operation::AddS, Operation::MulS, Operation::DivS] {
+        let rhs = match operation {
+            Operation::AddS => f32::MAX,
+            Operation::MulS => 2.0f32,
+            Operation::DivS => 0.5f32,
+            _ => unreachable!(),
+        };
+
+        let result = checked_single(&operation, f32::MAX.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.value, f32::INFINITY.to_bits(),);
+
+        assert_eq!(result.exceptions, FP_OVERFLOW | FP_INEXACT,);
+    }
+}
+
+#[test]
+fn fpu_single_underflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let smallest = f32::from_bits(1);
+
+    let result = checked_single(&Operation::MulS, smallest.to_bits(), 0.5f32.to_bits());
+
+    assert_eq!(result.value, 0);
+
+    assert_eq!(result.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+
+    // Exact subnormal result.
+    let result = checked_single(
+        &Operation::MulS,
+        f32::MIN_POSITIVE.to_bits(),
+        0.5f32.to_bits(),
+    );
+
+    assert_eq!(result.value, 0x0040_0000);
+    assert_eq!(result.exceptions, 0);
+}
+
+#[test]
+fn fpu_single_arithmetic_inexact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs) in [
+        (Operation::AddS, 1.0f32, 2.0f32.powi(-24)),
+        (Operation::AddS, 1.0, 2.0f32.powi(-100)),
+        (Operation::SubS, 1.0, 2.0f32.powi(-100)),
+        (Operation::MulS, 1.1, 1.1),
+        (Operation::DivS, 1.0, 3.0),
+    ] {
+        let result = checked_single(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_single_arithmetic_exact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs, expected) in [
+        (Operation::AddS, 1.5f32, 2.5f32, 4.0f32),
+        (Operation::SubS, 4.0, 1.5, 2.5),
+        (Operation::MulS, 1.5, 2.0, 3.0),
+        (Operation::DivS, 3.0, 2.0, 1.5),
+    ] {
+        let result = checked_single(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.value, expected.to_bits(),);
+
+        assert_eq!(result.exceptions, 0);
+    }
+}
+#[test]
+fn fpu_single_sqrt_inexact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (value, exceptions) in [
+        (2.0f32, FP_INEXACT),
+        (3.0, FP_INEXACT),
+        (4.0, 0),
+        (9.0, 0),
+        (0.0, 0),
+        (-0.0, 0),
+    ] {
+        let result = checked_single_unary(&Operation::SqrtS, value.to_bits());
+
+        assert_eq!(result.value, value.sqrt().to_bits(),);
+
+        assert_eq!(result.exceptions, exceptions,);
+    }
+}
+
+#[test]
+fn cp1_single_rounding_exception_integration() {
+    for (lhs, rhs, funct, exceptions) in [
+        (f32::MAX, 2.0f32, 2u32, 0b00101u32),
+        (f32::from_bits(1), 0.5, 2, 0b00011),
+        (1.0, 3.0, 3, 0b00001),
+    ] {
+        for enable in [0, exceptions] {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            cpu.cp1_mut().write_control(31, enable << 7);
+
+            cpu.cp1_mut().write_word(2, lhs.to_bits());
+
+            cpu.cp1_mut().write_word(4, rhs.to_bits());
+
+            cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+            memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, funct));
+
+            cpu.step(&mut memory);
+
+            if enable == 0 {
+                assert_eq!(
+                    cpu.cp1().read_fcsr(),
+                    (exceptions << 12) | (exceptions << 2),
+                );
+
+                assert!(!cpu.cp0().exception_level());
+            } else {
+                assert_eq!(cpu.cp0().exception_code(), 15,);
+
+                assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF,);
+
+                assert_eq!(cpu.cp1().read_fcsr(), (exceptions << 12) | (enable << 7),);
+            }
+        }
+    }
+}
+
+#[test]
+fn fpu_double_overflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs) in [
+        (Operation::AddD, f64::MAX, f64::MAX),
+        (Operation::SubD, -f64::MAX, f64::MAX),
+        (Operation::MulD, f64::MAX, 2.0),
+        (Operation::DivD, f64::MAX, 0.5),
+    ] {
+        let result = checked_double(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert!(f64::from_bits(result.value).is_infinite());
+
+        assert_eq!(result.exceptions, FP_OVERFLOW | FP_INEXACT,);
+    }
+}
+
+#[test]
+fn fpu_double_underflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let smallest = f64::from_bits(1);
+
+    let result = checked_double(&Operation::MulD, smallest.to_bits(), 0.5f64.to_bits());
+
+    assert_eq!(result.value, 0);
+
+    assert_eq!(result.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+
+    let result = checked_double(
+        &Operation::MulD,
+        f64::MIN_POSITIVE.to_bits(),
+        0.5f64.to_bits(),
+    );
+
+    assert_eq!(result.value, 0x0008_0000_0000_0000,);
+
+    assert_eq!(result.exceptions, 0);
+
+    // Nonzero, inexact subnormal.
+    let result = checked_double(
+        &Operation::MulD,
+        f64::from_bits(3).to_bits(),
+        0.5f64.to_bits(),
+    );
+
+    assert_eq!(result.value, 2);
+
+    assert_eq!(result.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+}
+
+#[test]
+fn fpu_double_arithmetic_inexact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs) in [
+        (Operation::AddD, 1.0f64, 2.0f64.powi(-53)),
+        (Operation::AddD, 1.0, 2.0f64.powi(-1000)),
+        (Operation::SubD, 1.0, 2.0f64.powi(-1000)),
+        (Operation::MulD, 1.1, 1.1),
+        (Operation::DivD, 1.0, 3.0),
+        (Operation::DivD, 2.0, 7.0),
+    ] {
+        let result = checked_double(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_double_arithmetic_exact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (operation, lhs, rhs, expected) in [
+        (Operation::AddD, 1.5f64, 2.5f64, 4.0f64),
+        (Operation::SubD, 4.0, 1.5, 2.5),
+        (Operation::MulD, 1.5, 2.0, 3.0),
+        (Operation::DivD, 3.0, 2.0, 1.5),
+        (Operation::AddD, -1.0, 1.0, 0.0),
+        (Operation::SubD, -1.0, -1.0, 0.0),
+        (Operation::DivD, f64::MAX, f64::MAX, 1.0),
+    ] {
+        let result = checked_double(&operation, lhs.to_bits(), rhs.to_bits());
+
+        assert_eq!(f64::from_bits(result.value), expected,);
+
+        assert_eq!(result.exceptions, 0);
+    }
+}
+
+#[test]
+fn fpu_double_sqrt_inexact() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (value, exceptions) in [
+        (2.0f64, FP_INEXACT),
+        (3.0, FP_INEXACT),
+        (4.0, 0),
+        (9.0, 0),
+        (0.0, 0),
+        (-0.0, 0),
+        (f64::from_bits(1), 0),
+    ] {
+        let result = checked_double_unary(&Operation::SqrtD, value.to_bits());
+
+        assert_eq!(result.value, value.sqrt().to_bits(),);
+
+        assert_eq!(result.exceptions, exceptions,);
+    }
+}
+
+#[test]
+fn fpu_double_exponent_boundaries() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let tiny = f64::from_bits(1);
+
+    let result = checked_double(&Operation::AddD, 1.0f64.to_bits(), tiny.to_bits());
+
+    assert_eq!(result.value, 1.0f64.to_bits());
+    assert_eq!(result.exceptions, FP_INEXACT);
+
+    let result = checked_double(&Operation::SubD, f64::MAX.to_bits(), f64::MAX.to_bits());
+
+    assert_eq!(result.value, 0);
+    assert_eq!(result.exceptions, 0);
+
+    let result = checked_double(&Operation::AddD, tiny.to_bits(), tiny.to_bits());
+
+    assert_eq!(result.value, 2);
+    assert_eq!(result.exceptions, 0);
+
+    let result = checked_double(
+        &Operation::SubD,
+        f64::MIN_POSITIVE.to_bits(),
+        f64::from_bits(0x000F_FFFF_FFFF_FFFF).to_bits(),
+    );
+
+    assert_eq!(result.value, 1);
+    assert_eq!(result.exceptions, 0);
+}
+
+#[test]
+fn cp1_double_rounding_exception_integration() {
+    for (lhs, rhs, funct, exceptions) in [
+        (f64::MAX, 2.0f64, 2u32, 0b00101u32),
+        (f64::from_bits(1), 0.5, 2, 0b00011),
+        (1.0, 3.0, 3, 0b00001),
+    ] {
+        for enable in [0, exceptions] {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            cpu.cp1_mut().write_control(31, enable << 7);
+
+            cpu.cp1_mut().write_doubleword(2, lhs.to_bits());
+
+            cpu.cp1_mut().write_doubleword(4, rhs.to_bits());
+
+            let sentinel = 0x1234_5678_DEAD_BEEFu64;
+
+            cpu.cp1_mut().write_doubleword(6, sentinel);
+
+            memory.write_word(0, encode_r(0x11, 0x11, 4, 2, 6, funct));
+
+            cpu.step(&mut memory);
+
+            if enable == 0 {
+                assert_eq!(
+                    cpu.cp1().read_fcsr(),
+                    (exceptions << 12) | (exceptions << 2),
+                );
+
+                assert!(!cpu.cp0().exception_level());
+            } else {
+                assert_eq!(cpu.cp0().exception_code(), 15,);
+
+                assert_eq!(cpu.cp1().read_doubleword(6), Some(sentinel),);
+
+                assert_eq!(cpu.cp1().read_fcsr(), (exceptions << 12) | (enable << 7),);
+            }
+        }
+    }
+}

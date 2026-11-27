@@ -12,8 +12,8 @@ use crate::exception::Exception;
 use crate::mmu::AccessType;
 
 use crate::fpu::{
-    RoundingMode, compare_double, compare_single, compute_double, compute_double_unary,
-    compute_single, compute_single_unary, convert_double_to_single, convert_double_to_word,
+    RoundingMode, checked_double, checked_double_unary, checked_single, checked_single_unary,
+    compare_double, compare_single, convert_double_to_single, convert_double_to_word,
     convert_single_to_double, convert_single_to_word, convert_word_to_double,
     convert_word_to_single,
 };
@@ -840,9 +840,15 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let lhs = cpu.cp1().read_word(fs);
             let rhs = cpu.cp1().read_word(ft);
 
-            let result = compute_single(operation, lhs, rhs);
+            let result = checked_single(operation, lhs, rhs);
 
-            cpu.cp1_mut().write_word(fd, result);
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
         }
 
         Operation::AbsS | Operation::MovS | Operation::NegS | Operation::SqrtS => {
@@ -851,9 +857,17 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             let operand = cpu.cp1().read_word(fs);
 
-            let result = compute_single_unary(operation, operand);
+            let result = checked_single_unary(operation, operand);
 
-            cpu.cp1_mut().write_word(fd, result);
+            if !matches!(operation, Operation::MovS)
+                && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
+            {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
         }
 
         Operation::AddD | Operation::SubD | Operation::MulD | Operation::DivD => {
@@ -881,9 +895,15 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 .read_doubleword(ft)
                 .expect("validated source register");
 
-            let result = compute_double(operation, lhs, rhs);
+            let result = checked_double(operation, lhs, rhs);
 
-            cpu.cp1_mut().write_doubleword(fd, result);
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_doubleword(fd, result.value);
         }
 
         Operation::AbsD | Operation::MovD | Operation::NegD | Operation::SqrtD => {
@@ -902,9 +922,17 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 .read_doubleword(fs)
                 .expect("validated source register");
 
-            let result = compute_double_unary(operation, operand);
+            let result = checked_double_unary(operation, operand);
 
-            cpu.cp1_mut().write_doubleword(fd, result);
+            if !matches!(operation, Operation::MovD)
+                && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
+            {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_doubleword(fd, result.value);
         }
 
         Operation::CvtDS => {
