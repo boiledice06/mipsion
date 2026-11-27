@@ -12,10 +12,9 @@ use crate::exception::Exception;
 use crate::mmu::AccessType;
 
 use crate::fpu::{
-    RoundingMode, checked_double, checked_double_unary, checked_single, checked_single_unary,
-    compare_double, compare_single, convert_double_to_single, convert_double_to_word,
-    convert_single_to_double, convert_single_to_word, convert_word_to_double,
-    convert_word_to_single,
+    RoundingMode, checked_single_to_double, checked_word_to_double, compare_double, compare_single,
+    convert_double_to_word, convert_single_to_word, rounded_double, rounded_double_to_single,
+    rounded_double_unary, rounded_single, rounded_single_unary, rounded_word_to_single,
 };
 
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
@@ -840,8 +839,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let lhs = cpu.cp1().read_word(fs);
             let rhs = cpu.cp1().read_word(ft);
 
-            let result = checked_single(operation, lhs, rhs);
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
 
+            let result = rounded_single(operation, lhs, rhs, mode);
             if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
                 cpu.raise_exception(Exception::FloatingPoint, None);
 
@@ -857,7 +857,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             let operand = cpu.cp1().read_word(fs);
 
-            let result = checked_single_unary(operation, operand);
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_single_unary(operation, operand, mode);
 
             if !matches!(operation, Operation::MovS)
                 && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
@@ -895,7 +897,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 .read_doubleword(ft)
                 .expect("validated source register");
 
-            let result = checked_double(operation, lhs, rhs);
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_double(operation, lhs, rhs, mode);
 
             if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
                 cpu.raise_exception(Exception::FloatingPoint, None);
@@ -922,7 +926,9 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
                 .read_doubleword(fs)
                 .expect("validated source register");
 
-            let result = checked_double_unary(operation, operand);
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = rounded_double_unary(operation, operand, mode);
 
             if !matches!(operation, Operation::MovD)
                 && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
@@ -935,71 +941,71 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.cp1_mut().write_doubleword(fd, result.value);
         }
 
-        Operation::CvtDS => {
+        Operation::CvtDS | Operation::CvtSD | Operation::CvtSW | Operation::CvtDW => {
             let fs = inst.fs() as usize;
             let fd = inst.fd() as usize;
 
-            // Destination: doubleword
-            if !cpu.cp1().valid_double_register(fd) {
-                cpu.raise_exception(Exception::ReservedInstruction, None);
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
 
-                return;
+            match operation {
+                Operation::CvtDS | Operation::CvtDW => {
+                    if !cpu.cp1().valid_double_register(fd) {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    }
+
+                    let operand = cpu.cp1().read_word(fs);
+
+                    let result = match operation {
+                        Operation::CvtDS => checked_single_to_double(operand),
+
+                        Operation::CvtDW => checked_word_to_double(operand),
+
+                        _ => unreachable!(),
+                    };
+
+                    if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                        cpu.raise_exception(Exception::FloatingPoint, None);
+
+                        return;
+                    }
+
+                    cpu.cp1_mut().write_doubleword(fd, result.value);
+                }
+
+                Operation::CvtSD | Operation::CvtSW => {
+                    let result = match operation {
+                        Operation::CvtSD => {
+                            let Some(operand) = cpu.cp1().read_doubleword(fs) else {
+                                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                                return;
+                            };
+
+                            rounded_double_to_single(operand, mode)
+                        }
+
+                        Operation::CvtSW => {
+                            let operand = cpu.cp1().read_word(fs);
+
+                            rounded_word_to_single(operand, mode)
+                        }
+
+                        _ => unreachable!(),
+                    };
+
+                    if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                        cpu.raise_exception(Exception::FloatingPoint, None);
+
+                        return;
+                    }
+
+                    cpu.cp1_mut().write_word(fd, result.value);
+                }
+
+                _ => unreachable!(),
             }
-
-            let operand = cpu.cp1().read_word(fs);
-
-            let result = convert_single_to_double(operand);
-
-            cpu.cp1_mut().write_doubleword(fd, result);
-        }
-
-        Operation::CvtSD => {
-            let fs = inst.fs() as usize;
-            let fd = inst.fd() as usize;
-
-            // Source: doubleword
-            if !cpu.cp1().valid_double_register(fs) {
-                cpu.raise_exception(Exception::ReservedInstruction, None);
-
-                return;
-            }
-
-            let operand = cpu
-                .cp1()
-                .read_doubleword(fs)
-                .expect("validated source register");
-
-            let result = convert_double_to_single(operand);
-
-            cpu.cp1_mut().write_word(fd, result);
-        }
-
-        Operation::CvtSW => {
-            let fs = inst.fs() as usize;
-            let fd = inst.fd() as usize;
-
-            let operand = cpu.cp1().read_word(fs);
-
-            let result = convert_word_to_single(operand);
-
-            cpu.cp1_mut().write_word(fd, result);
-        }
-
-        Operation::CvtDW => {
-            let fs = inst.fs() as usize;
-            let fd = inst.fd() as usize;
-
-            if !cpu.cp1().valid_double_register(fd) {
-                cpu.raise_exception(Exception::ReservedInstruction, None);
-
-                return;
-            }
-
-            let operand = cpu.cp1().read_word(fs);
-
-            let result = convert_word_to_double(operand);
-
-            cpu.cp1_mut().write_doubleword(fd, result);
         }
 
         Operation::CvtWS

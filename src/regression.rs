@@ -7453,3 +7453,765 @@ fn cp1_double_rounding_exception_integration() {
         }
     }
 }
+
+#[test]
+fn fpu_single_directed_add() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let modes = [
+        RoundingMode::NearestEven,
+        RoundingMode::TowardZero,
+        RoundingMode::TowardPositive,
+        RoundingMode::TowardNegative,
+    ];
+
+    let half_ulp = 2.0f32.powi(-24);
+
+    for (mode, positive, negative) in [
+        (modes[0], 0x3F80_0000, 0xBF80_0000),
+        (modes[1], 0x3F80_0000, 0xBF80_0000),
+        (modes[2], 0x3F80_0001, 0xBF80_0000),
+        (modes[3], 0x3F80_0000, 0xBF80_0001),
+    ] {
+        for (lhs, rhs, expected) in [(1.0f32, half_ulp, positive), (-1.0f32, -half_ulp, negative)] {
+            let result = rounded_single(&Operation::AddS, lhs.to_bits(), rhs.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, FP_INEXACT);
+        }
+    }
+}
+
+#[test]
+fn fpu_single_directed_sub() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0x3F80_0000),
+        (RoundingMode::TowardZero, 0x3F7F_FFFF),
+        (RoundingMode::TowardPositive, 0x3F80_0000),
+        (RoundingMode::TowardNegative, 0x3F7F_FFFF),
+    ] {
+        let result = rounded_single(
+            &Operation::SubS,
+            1.0f32.to_bits(),
+            2.0f32.powi(-100).to_bits(),
+            mode,
+        );
+
+        assert_eq!(result.value, expected);
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_single_directed_mul_div() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let a = f32::from_bits(0x3F80_0001);
+
+    for (mode, expected_mul, expected_div) in [
+        (RoundingMode::NearestEven, 0x3F80_0002, 0x3EAA_AAAB),
+        (RoundingMode::TowardZero, 0x3F80_0002, 0x3EAA_AAAA),
+        (RoundingMode::TowardPositive, 0x3F80_0003, 0x3EAA_AAAB),
+        (RoundingMode::TowardNegative, 0x3F80_0002, 0x3EAA_AAAA),
+    ] {
+        let mul = rounded_single(&Operation::MulS, a.to_bits(), a.to_bits(), mode);
+
+        let div = rounded_single(&Operation::DivS, 1.0f32.to_bits(), 3.0f32.to_bits(), mode);
+
+        assert_eq!(mul.value, expected_mul);
+        assert_eq!(div.value, expected_div);
+
+        assert_eq!(mul.exceptions, FP_INEXACT);
+        assert_eq!(div.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_single_directed_sqrt() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0x3FB5_04F3),
+        (RoundingMode::TowardZero, 0x3FB5_04F3),
+        (RoundingMode::TowardPositive, 0x3FB5_04F4),
+        (RoundingMode::TowardNegative, 0x3FB5_04F3),
+    ] {
+        let result = rounded_single_unary(&Operation::SqrtS, 2.0f32.to_bits(), mode);
+
+        assert_eq!(result.value, expected);
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_single_directed_overflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0x7F80_0000, 0xFF80_0000),
+        (RoundingMode::TowardZero, 0x7F7F_FFFF, 0xFF7F_FFFF),
+        (RoundingMode::TowardPositive, 0x7F80_0000, 0xFF7F_FFFF),
+        (RoundingMode::TowardNegative, 0x7F7F_FFFF, 0xFF80_0000),
+    ] {
+        for (lhs, expected) in [(f32::MAX, positive), (-f32::MAX, negative)] {
+            let result = rounded_single(&Operation::MulS, lhs.to_bits(), 2.0f32.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+
+            assert_eq!(result.exceptions, FP_OVERFLOW | FP_INEXACT,);
+        }
+    }
+
+    let boundary = rounded_single(
+        &Operation::AddS,
+        f32::MAX.to_bits(),
+        2.0f32.powi(103).to_bits(),
+        RoundingMode::TowardZero,
+    );
+
+    assert_eq!(boundary.value, f32::MAX.to_bits());
+    assert_eq!(boundary.exceptions, FP_INEXACT);
+
+    let boundary = rounded_single(
+        &Operation::AddS,
+        f32::MAX.to_bits(),
+        1.0f32.to_bits(),
+        RoundingMode::TowardPositive,
+    );
+
+    assert_eq!(boundary.value, f32::INFINITY.to_bits());
+
+    assert_eq!(boundary.exceptions, FP_OVERFLOW | FP_INEXACT,);
+}
+
+#[test]
+fn fpu_single_directed_underflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0, 0x8000_0000),
+        (RoundingMode::TowardZero, 0, 0x8000_0000),
+        (RoundingMode::TowardPositive, 1, 0x8000_0000),
+        (RoundingMode::TowardNegative, 0, 0x8000_0001),
+    ] {
+        for (operand, expected) in [(1u32, positive), (0x8000_0001, negative)] {
+            let result = rounded_single(&Operation::MulS, operand, 0.5f32.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+
+            assert_eq!(result.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+        }
+    }
+}
+
+#[test]
+fn fpu_single_directed_signed_zero() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0),
+        (RoundingMode::TowardZero, 0),
+        (RoundingMode::TowardPositive, 0),
+        (RoundingMode::TowardNegative, 0x8000_0000),
+    ] {
+        for (operation, lhs, rhs) in [
+            (Operation::AddS, 1.0f32, -1.0f32),
+            (Operation::SubS, 1.0, 1.0),
+            (Operation::AddS, 0.0, -0.0),
+        ] {
+            let result = rounded_single(&operation, lhs.to_bits(), rhs.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, 0);
+        }
+    }
+}
+
+#[test]
+fn cp1_single_directed_rounding_integration() {
+    for (rm, expected) in [
+        (0u32, 0x3EAA_AAAB),
+        (1, 0x3EAA_AAAA),
+        (2, 0x3EAA_AAAB),
+        (3, 0x3EAA_AAAA),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(8);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.write_reg(8, rm);
+
+        cpu.cp1_mut().write_word(2, 1.0f32.to_bits());
+
+        cpu.cp1_mut().write_word(4, 3.0f32.to_bits());
+
+        // CTC1 $8, $31
+        memory.write_word(0, encode_r(0x11, 6, 8, 31, 0, 0));
+
+        // DIV.S $f6, $f2, $f4
+        memory.write_word(4, encode_r(0x11, 0x10, 4, 2, 6, 3));
+
+        cpu.step(&mut memory);
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(6), expected,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 12) | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn fpu_double_directed_add() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let half_ulp = 2.0f64.powi(-53);
+
+    for (mode, positive, negative) in [
+        (
+            RoundingMode::NearestEven,
+            0x3FF0_0000_0000_0000,
+            0xBFF0_0000_0000_0000,
+        ),
+        (
+            RoundingMode::TowardZero,
+            0x3FF0_0000_0000_0000,
+            0xBFF0_0000_0000_0000,
+        ),
+        (
+            RoundingMode::TowardPositive,
+            0x3FF0_0000_0000_0001,
+            0xBFF0_0000_0000_0000,
+        ),
+        (
+            RoundingMode::TowardNegative,
+            0x3FF0_0000_0000_0000,
+            0xBFF0_0000_0000_0001,
+        ),
+    ] {
+        for (lhs, rhs, expected) in [(1.0f64, half_ulp, positive), (-1.0f64, -half_ulp, negative)] {
+            let result = rounded_double(&Operation::AddD, lhs.to_bits(), rhs.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, FP_INEXACT);
+        }
+    }
+}
+
+#[test]
+fn fpu_double_directed_sub() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0x3FF0_0000_0000_0000),
+        (RoundingMode::TowardZero, 0x3FEF_FFFF_FFFF_FFFF),
+        (RoundingMode::TowardPositive, 0x3FF0_0000_0000_0000),
+        (RoundingMode::TowardNegative, 0x3FEF_FFFF_FFFF_FFFF),
+    ] {
+        let result = rounded_double(
+            &Operation::SubD,
+            1.0f64.to_bits(),
+            1, // Minimum subnormal: 2^-1074
+            mode,
+        );
+
+        assert_eq!(result.value, expected);
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_double_directed_mul_div() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    let a = 0x3FF0_0000_0000_0001u64;
+
+    for (mode, expected_mul, expected_div) in [
+        (
+            RoundingMode::NearestEven,
+            0x3FF0_0000_0000_0002,
+            0x3FD5_5555_5555_5555,
+        ),
+        (
+            RoundingMode::TowardZero,
+            0x3FF0_0000_0000_0002,
+            0x3FD5_5555_5555_5555,
+        ),
+        (
+            RoundingMode::TowardPositive,
+            0x3FF0_0000_0000_0003,
+            0x3FD5_5555_5555_5556,
+        ),
+        (
+            RoundingMode::TowardNegative,
+            0x3FF0_0000_0000_0002,
+            0x3FD5_5555_5555_5555,
+        ),
+    ] {
+        let mul = rounded_double(&Operation::MulD, a, a, mode);
+
+        let div = rounded_double(&Operation::DivD, 1.0f64.to_bits(), 3.0f64.to_bits(), mode);
+
+        assert_eq!(mul.value, expected_mul);
+        assert_eq!(div.value, expected_div);
+
+        assert_eq!(mul.exceptions, FP_INEXACT);
+        assert_eq!(div.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_double_directed_sqrt() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0x3FF6_A09E_667F_3BCD),
+        (RoundingMode::TowardZero, 0x3FF6_A09E_667F_3BCC),
+        (RoundingMode::TowardPositive, 0x3FF6_A09E_667F_3BCD),
+        (RoundingMode::TowardNegative, 0x3FF6_A09E_667F_3BCC),
+    ] {
+        let result = rounded_double_unary(&Operation::SqrtD, 2.0f64.to_bits(), mode);
+
+        assert_eq!(result.value, expected);
+        assert_eq!(result.exceptions, FP_INEXACT);
+    }
+}
+
+#[test]
+fn fpu_double_directed_overflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, positive, negative) in [
+        (
+            RoundingMode::NearestEven,
+            0x7FF0_0000_0000_0000,
+            0xFFF0_0000_0000_0000,
+        ),
+        (
+            RoundingMode::TowardZero,
+            0x7FEF_FFFF_FFFF_FFFF,
+            0xFFEF_FFFF_FFFF_FFFF,
+        ),
+        (
+            RoundingMode::TowardPositive,
+            0x7FF0_0000_0000_0000,
+            0xFFEF_FFFF_FFFF_FFFF,
+        ),
+        (
+            RoundingMode::TowardNegative,
+            0x7FEF_FFFF_FFFF_FFFF,
+            0xFFF0_0000_0000_0000,
+        ),
+    ] {
+        for (lhs, expected) in [(f64::MAX, positive), (-f64::MAX, negative)] {
+            let result = rounded_double(&Operation::MulD, lhs.to_bits(), 2.0f64.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+
+            assert_eq!(result.exceptions, FP_OVERFLOW | FP_INEXACT,);
+        }
+    }
+
+    let boundary = rounded_double(
+        &Operation::AddD,
+        f64::MAX.to_bits(),
+        2.0f64.powi(970).to_bits(),
+        RoundingMode::TowardZero,
+    );
+
+    assert_eq!(boundary.value, f64::MAX.to_bits());
+    assert_eq!(boundary.exceptions, FP_INEXACT);
+
+    let boundary = rounded_double(
+        &Operation::AddD,
+        f64::MAX.to_bits(),
+        1.0f64.to_bits(),
+        RoundingMode::TowardPositive,
+    );
+
+    assert_eq!(boundary.value, f64::INFINITY.to_bits(),);
+
+    assert_eq!(boundary.exceptions, FP_OVERFLOW | FP_INEXACT,);
+}
+
+#[test]
+fn fpu_double_directed_underflow() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0, 0x8000_0000_0000_0000),
+        (RoundingMode::TowardZero, 0, 0x8000_0000_0000_0000),
+        (RoundingMode::TowardPositive, 1, 0x8000_0000_0000_0000),
+        (RoundingMode::TowardNegative, 0, 0x8000_0000_0000_0001),
+    ] {
+        for (operand, expected) in [(1u64, positive), (0x8000_0000_0000_0001, negative)] {
+            let result = rounded_double(&Operation::MulD, operand, 0.5f64.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+
+            assert_eq!(result.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+        }
+    }
+}
+
+#[test]
+fn fpu_double_directed_signed_zero() {
+    use crate::fpu::*;
+    use crate::isa::Operation;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0),
+        (RoundingMode::TowardZero, 0),
+        (RoundingMode::TowardPositive, 0),
+        (RoundingMode::TowardNegative, 0x8000_0000_0000_0000),
+    ] {
+        for (operation, lhs, rhs) in [
+            (Operation::AddD, 1.0f64, -1.0f64),
+            (Operation::SubD, 1.0, 1.0),
+            (Operation::AddD, 0.0, -0.0),
+        ] {
+            let result = rounded_double(&operation, lhs.to_bits(), rhs.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, 0);
+        }
+    }
+}
+
+#[test]
+fn cp1_double_directed_rounding_integration() {
+    for (rm, expected) in [
+        (0u32, 0x3FD5_5555_5555_5555),
+        (1, 0x3FD5_5555_5555_5555),
+        (2, 0x3FD5_5555_5555_5556),
+        (3, 0x3FD5_5555_5555_5555),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(8);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.write_reg(8, rm);
+
+        cpu.cp1_mut().write_doubleword(2, 1.0f64.to_bits());
+
+        cpu.cp1_mut().write_doubleword(4, 3.0f64.to_bits());
+
+        // CTC1 $8, $31
+        memory.write_word(0, encode_r(0x11, 6, 8, 31, 0, 0));
+
+        // DIV.D $f6, $f2, $f4
+        memory.write_word(4, encode_r(0x11, 0x11, 4, 2, 6, 3));
+
+        cpu.step(&mut memory);
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_doubleword(6), Some(expected),);
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 12) | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn fpu_cvt_sd_directed_rounding() {
+    use crate::fpu::*;
+
+    let value = 1.0f64 + 2.0f64.powi(-24);
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0x3F80_0000, 0xBF80_0000),
+        (RoundingMode::TowardZero, 0x3F80_0000, 0xBF80_0000),
+        (RoundingMode::TowardPositive, 0x3F80_0001, 0xBF80_0000),
+        (RoundingMode::TowardNegative, 0x3F80_0000, 0xBF80_0001),
+    ] {
+        for (operand, expected) in [(value, positive), (-value, negative)] {
+            let result = rounded_double_to_single(operand.to_bits(), mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, FP_INEXACT);
+        }
+    }
+}
+
+#[test]
+fn fpu_cvt_sw_directed_rounding() {
+    use crate::fpu::*;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0x4B80_0000, 0xCB80_0000),
+        (RoundingMode::TowardZero, 0x4B80_0000, 0xCB80_0000),
+        (RoundingMode::TowardPositive, 0x4B80_0001, 0xCB80_0000),
+        (RoundingMode::TowardNegative, 0x4B80_0000, 0xCB80_0001),
+    ] {
+        for (operand, expected) in [(16_777_217i32, positive), (-16_777_217i32, negative)] {
+            let result = rounded_word_to_single(operand as u32, mode);
+
+            assert_eq!(result.value, expected);
+            assert_eq!(result.exceptions, FP_INEXACT);
+        }
+    }
+}
+
+#[test]
+fn fpu_exact_widening_conversions() {
+    use crate::fpu::*;
+
+    for value in [
+        0.0f32,
+        -0.0,
+        1.5,
+        -123.75,
+        f32::MAX,
+        f32::MIN_POSITIVE,
+        f32::from_bits(1),
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ] {
+        let result = checked_single_to_double(value.to_bits());
+
+        assert_eq!(result.value, (value as f64).to_bits(),);
+
+        assert_eq!(result.exceptions, 0);
+    }
+
+    for value in [0i32, 1, -1, i32::MAX, i32::MIN, 16_777_217] {
+        let result = checked_word_to_double(value as u32);
+
+        assert_eq!(result.value, (value as f64).to_bits(),);
+
+        assert_eq!(result.exceptions, 0);
+    }
+}
+
+#[test]
+fn fpu_cvt_sd_range_exceptions() {
+    use crate::fpu::*;
+
+    for (mode, overflow_value, underflow_value) in [
+        (RoundingMode::NearestEven, 0x7F80_0000, 0),
+        (RoundingMode::TowardZero, 0x7F7F_FFFF, 0),
+        (RoundingMode::TowardPositive, 0x7F80_0000, 1),
+        (RoundingMode::TowardNegative, 0x7F7F_FFFF, 0),
+    ] {
+        let overflow = rounded_double_to_single(f64::MAX.to_bits(), mode);
+
+        assert_eq!(overflow.value, overflow_value);
+
+        assert_eq!(overflow.exceptions, FP_OVERFLOW | FP_INEXACT,);
+
+        let underflow = rounded_double_to_single(2.0f64.powi(-150).to_bits(), mode);
+
+        assert_eq!(underflow.value, underflow_value);
+
+        assert_eq!(underflow.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+    }
+
+    let exact = rounded_double_to_single(2.0f64.powi(-149).to_bits(), RoundingMode::NearestEven);
+
+    assert_eq!(exact.value, 1);
+    assert_eq!(exact.exceptions, 0);
+
+    let boundary = rounded_double_to_single(
+        ((f32::MAX as f64) + 2.0f64.powi(103)).to_bits(),
+        RoundingMode::TowardZero,
+    );
+
+    assert_eq!(boundary.value, f32::MAX.to_bits());
+    assert_eq!(boundary.exceptions, FP_INEXACT);
+}
+
+#[test]
+fn fpu_conversion_special_values() {
+    use crate::fpu::*;
+
+    for (operand, exceptions) in [(0x7FBF_FFFFu32, 0), (0x7FC0_0000, FP_INVALID)] {
+        let result = checked_single_to_double(operand);
+
+        assert_eq!(result.value, LEGACY_QNAN_DOUBLE,);
+
+        assert_eq!(result.exceptions, exceptions);
+    }
+
+    for (operand, exceptions) in [
+        (0x7FF7_FFFF_FFFF_FFFFu64, 0),
+        (0x7FF8_0000_0000_0000, FP_INVALID),
+    ] {
+        let result = rounded_double_to_single(operand, RoundingMode::NearestEven);
+
+        assert_eq!(result.value, LEGACY_QNAN_SINGLE,);
+
+        assert_eq!(result.exceptions, exceptions);
+    }
+
+    for value in [0.0f64, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+        let result = rounded_double_to_single(value.to_bits(), RoundingMode::TowardZero);
+
+        assert_eq!(result.value, (value as f32).to_bits(),);
+
+        assert_eq!(result.exceptions, 0);
+    }
+}
+#[test]
+fn fpu_cvt_sw_integer_boundaries() {
+    use crate::fpu::*;
+
+    for (mode, expected) in [
+        (RoundingMode::NearestEven, 0x4F00_0000),
+        (RoundingMode::TowardZero, 0x4EFF_FFFF),
+        (RoundingMode::TowardPositive, 0x4F00_0000),
+        (RoundingMode::TowardNegative, 0x4EFF_FFFF),
+    ] {
+        let result = rounded_word_to_single(i32::MAX as u32, mode);
+
+        assert_eq!(result.value, expected);
+        assert_eq!(result.exceptions, FP_INEXACT);
+
+        let result = rounded_word_to_single(i32::MIN as u32, mode);
+
+        assert_eq!(result.value, (i32::MIN as f32).to_bits(),);
+
+        assert_eq!(result.exceptions, 0);
+    }
+}
+
+#[test]
+fn cp1_conversion_rounding_integration() {
+    for (rm, expected_sd, expected_sw) in [
+        (0u32, 0x3F80_0000, 0x4B80_0000),
+        (1, 0x3F80_0000, 0x4B80_0000),
+        (2, 0x3F80_0001, 0x4B80_0001),
+        (3, 0x3F80_0000, 0x4B80_0000),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(16);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_control(31, rm);
+
+        cpu.cp1_mut()
+            .write_doubleword(2, (1.0f64 + 2.0f64.powi(-24)).to_bits());
+
+        cpu.cp1_mut().write_word(4, 16_777_217);
+
+        let program = [
+            // CVT.S.D $f6, $f2
+            encode_r(0x11, 0x11, 0, 2, 6, 0x20),
+            // CVT.S.W $f8, $f4
+            encode_r(0x11, 0x14, 0, 4, 8, 0x20),
+            // CVT.D.S $f10, $f6
+            encode_r(0x11, 0x10, 0, 6, 10, 0x21),
+            // CVT.D.W $f12, $f4
+            encode_r(0x11, 0x14, 0, 4, 12, 0x21),
+        ];
+
+        for (index, word) in program.into_iter().enumerate() {
+            memory.write_word((index * 4) as u32, word);
+        }
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(6), expected_sd,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 12) | (1 << 2),);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(8), expected_sw,);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(
+            cpu.cp1().read_doubleword(10),
+            Some((f32::from_bits(expected_sd) as f64).to_bits(),),
+        );
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 2),);
+
+        cpu.step(&mut memory);
+
+        assert_eq!(
+            cpu.cp1().read_doubleword(12),
+            Some(16_777_217.0f64.to_bits()),
+        );
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn cp1_conversion_exception_traps() {
+    use crate::fpu::*;
+
+    for (fmt, funct, source, exceptions, enable) in [
+        (
+            0x11u32,
+            0x20u32,
+            f64::MAX.to_bits(),
+            FP_OVERFLOW | FP_INEXACT,
+            FP_OVERFLOW,
+        ),
+        (
+            0x11,
+            0x20,
+            2.0f64.powi(-150).to_bits(),
+            FP_UNDERFLOW | FP_INEXACT,
+            FP_UNDERFLOW,
+        ),
+        (
+            0x11,
+            0x20,
+            (1.0f64 + 2.0f64.powi(-24)).to_bits(),
+            FP_INEXACT,
+            FP_INEXACT,
+        ),
+        (0x10, 0x21, 0x7FC0_0000u64, FP_INVALID, FP_INVALID),
+        (0x14, 0x20, 16_777_217u64, FP_INEXACT, FP_INEXACT),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_control(31, enable << 7);
+
+        cpu.cp1_mut().write_doubleword(2, source);
+
+        let sentinel = 0x1234_5678_DEAD_BEEFu64;
+
+        cpu.cp1_mut().write_doubleword(6, sentinel);
+
+        memory.write_word(0, encode_r(0x11, fmt, 0, 2, 6, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 15);
+
+        assert_eq!(cpu.cp0().read_epc(), 0);
+
+        assert_eq!(cpu.cp1().read_doubleword(6), Some(sentinel),);
+
+        assert_eq!(cpu.cp1().read_fcsr(), (enable << 7) | (exceptions << 12),);
+    }
+}

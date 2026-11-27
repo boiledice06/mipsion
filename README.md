@@ -32,7 +32,7 @@ v0.3.0 (in development) — Floating-Point Unit
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Regression tests | 343 / 343 passing |
+| Regression tests | 367 / 367 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -79,6 +79,10 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Basic Overflow, Underflow and Inexact detection for S/D arithmetic
 - [x] Integer-based exactness checks for double-precision arithmetic
 - [x] Arithmetic exception traps and destination writeback suppression
+- [x] All four FCSR rounding modes for S/D arithmetic
+- [x] Directed rounding for narrowing format conversions
+- [x] Legacy NaN and exception handling for format conversions
+- [x] Exact dyadic comparison using fixed-size integer accumulators
 - [ ] Full floating-point conformance
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -132,8 +136,10 @@ The current core is exercised through regression tests. A standalone program loa
 - Comparisons support legacy NaN classification and Invalid Operation handling.
 - All 86 basic FPU instructions have execution paths.
 - Basic detection of all five IEEE 754 arithmetic exceptions is available for single- and double-precision arithmetic.
-- Arithmetic currently uses native nearest-even results with simplified tininess detection.
-- Full FCSR rounding, FS behavior, exception priority and IEEE 754 conformance remain incomplete.
+- Arithmetic supports all four rounding modes through native nearest-even results and exact-result comparisons.
+- Narrowing format conversions support directed rounding and basic range exception detection.
+- FS behavior, tininess boundary cases, exception priority and full IEEE 754 conformance remain incomplete.
+- Independent reference-FPU differential testing remains pending.
 - CP1 feature advertisement and full exception conformance remain incomplete.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.

@@ -590,3 +590,740 @@ fn double_binary_rounding_exceptions(
         FP_INEXACT
     }
 }
+
+fn next_up_single(bits: u32) -> u32 {
+    let value = f32::from_bits(bits);
+
+    if value.is_nan() || value == f32::INFINITY {
+        return bits;
+    }
+
+    if value == 0.0 {
+        return 1;
+    }
+
+    if value.is_sign_negative() {
+        bits - 1
+    } else {
+        bits + 1
+    }
+}
+
+fn next_down_single(bits: u32) -> u32 {
+    let value = f32::from_bits(bits);
+
+    if value.is_nan() || value == f32::NEG_INFINITY {
+        return bits;
+    }
+
+    if value == 0.0 {
+        return 0x8000_0001;
+    }
+
+    if value.is_sign_negative() {
+        bits + 1
+    } else {
+        bits - 1
+    }
+}
+fn compare_exact_single(
+    operation: &Operation,
+    lhs: f64,
+    rhs: f64,
+    candidate: f64,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    match operation {
+        Operation::AddS | Operation::SubS => {
+            let b = if matches!(operation, Operation::SubS) {
+                -rhs
+            } else {
+                rhs
+            };
+
+            // TwoSum: exact result = sum + error
+            let sum = lhs + b;
+            let z = sum - lhs;
+
+            let error = (lhs - (sum - z)) + (b - z);
+
+            if sum < candidate {
+                Ordering::Less
+            } else if sum > candidate {
+                Ordering::Greater
+            } else {
+                error.partial_cmp(&0.0).unwrap()
+            }
+        }
+
+        Operation::MulS => (lhs * rhs).partial_cmp(&candidate).unwrap(),
+
+        Operation::DivS => {
+            let ordering = lhs.partial_cmp(&(candidate * rhs)).unwrap();
+
+            if rhs.is_sign_negative() {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        }
+
+        Operation::SqrtS => lhs.partial_cmp(&(candidate * candidate)).unwrap(),
+
+        _ => unreachable!(),
+    }
+}
+
+fn direct_single_rounding(bits: u32, ordering: std::cmp::Ordering, mode: RoundingMode) -> u32 {
+    use std::cmp::Ordering;
+
+    if ordering == Ordering::Equal {
+        return bits;
+    }
+
+    let negative = bits & 0x8000_0000 != 0;
+
+    match mode {
+        RoundingMode::NearestEven => bits,
+
+        RoundingMode::TowardPositive => {
+            if ordering == Ordering::Greater {
+                next_up_single(bits)
+            } else {
+                bits
+            }
+        }
+
+        RoundingMode::TowardNegative => {
+            if ordering == Ordering::Less {
+                next_down_single(bits)
+            } else {
+                bits
+            }
+        }
+
+        RoundingMode::TowardZero => {
+            if negative {
+                if ordering == Ordering::Greater {
+                    next_up_single(bits)
+                } else {
+                    bits
+                }
+            } else if ordering == Ordering::Less {
+                next_down_single(bits)
+            } else {
+                bits
+            }
+        }
+    }
+}
+
+pub fn rounded_single(
+    operation: &Operation,
+    lhs: u32,
+    rhs: u32,
+    mode: RoundingMode,
+) -> FpResult<u32> {
+    use std::cmp::Ordering;
+
+    let mut result = checked_single(operation, lhs, rhs);
+
+    if matches!(mode, RoundingMode::NearestEven) {
+        return result;
+    }
+
+    let a = f32::from_bits(lhs);
+    let b = f32::from_bits(rhs);
+
+    // Special values are handled by checked_single.
+    if !a.is_finite() || !b.is_finite() || result.exceptions & (FP_INVALID | FP_DIVIDE_BY_ZERO) != 0
+    {
+        return result;
+    }
+
+    let native = f32::from_bits(result.value);
+
+    // Exact cancellation under roundTowardNegative.
+    if native == 0.0 && result.exceptions == 0 {
+        let opposite_signs = match operation {
+            Operation::AddS => a.is_sign_negative() != b.is_sign_negative(),
+
+            Operation::SubS => a.is_sign_negative() == b.is_sign_negative(),
+
+            _ => false,
+        };
+
+        if opposite_signs && matches!(mode, RoundingMode::TowardNegative) {
+            result.value = 0x8000_0000;
+        }
+
+        return result;
+    }
+
+    if result.exceptions & FP_INEXACT == 0 {
+        return result;
+    }
+
+    let negative = native.is_sign_negative();
+
+    // Handle nearest-even overflow separately.
+    if native.is_infinite() {
+        let saturate = match mode {
+            RoundingMode::TowardZero => true,
+
+            RoundingMode::TowardPositive => negative,
+
+            RoundingMode::TowardNegative => !negative,
+
+            RoundingMode::NearestEven => false,
+        };
+
+        if saturate {
+            result.value = if negative { 0xFF7F_FFFF } else { 0x7F7F_FFFF };
+
+            // Overflow threshold for rounding
+            // toward smaller magnitude: 2^128.
+            let limit = 2.0f64.powi(128);
+
+            let threshold = if negative { -limit } else { limit };
+
+            let ordering = compare_exact_single(operation, a as f64, b as f64, threshold);
+
+            let overflow = if negative {
+                ordering != Ordering::Greater
+            } else {
+                ordering != Ordering::Less
+            };
+
+            result.exceptions = FP_INEXACT;
+
+            if overflow {
+                result.exceptions |= FP_OVERFLOW;
+            }
+        }
+
+        return result;
+    }
+
+    let ordering = compare_exact_single(operation, a as f64, b as f64, native as f64);
+
+    result.value = direct_single_rounding(result.value, ordering, mode);
+
+    let rounded = f32::from_bits(result.value);
+
+    // Recompute range-related exceptions
+    // from the directed result.
+    result.exceptions = FP_INEXACT;
+
+    if rounded.is_infinite() {
+        result.exceptions |= FP_OVERFLOW;
+    } else if rounded.abs() < f32::MIN_POSITIVE {
+        result.exceptions |= FP_UNDERFLOW;
+    }
+
+    result
+}
+
+pub fn rounded_single_unary(
+    operation: &Operation,
+    operand: u32,
+    mode: RoundingMode,
+) -> FpResult<u32> {
+    let mut result = checked_single_unary(operation, operand);
+
+    if !matches!(operation, Operation::SqrtS)
+        || matches!(mode, RoundingMode::NearestEven)
+        || result.exceptions & FP_INEXACT == 0
+    {
+        return result;
+    }
+
+    let x = f32::from_bits(operand) as f64;
+    let r = f32::from_bits(result.value) as f64;
+
+    let ordering = compare_exact_single(operation, x, 0.0, r);
+
+    result.value = direct_single_rounding(result.value, ordering, mode);
+
+    result
+}
+
+impl Dyadic {
+    fn compare(self, rhs: Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        if self.significand == 0 && rhs.significand == 0 {
+            return Ordering::Equal;
+        }
+
+        if self.negative != rhs.negative {
+            return if self.negative {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+        }
+
+        let magnitude = if self.significand == 0 {
+            Ordering::Less
+        } else if rhs.significand == 0 {
+            Ordering::Greater
+        } else {
+            let lhs_top = self.exponent + (128 - self.significand.leading_zeros()) as i32;
+
+            let rhs_top = rhs.exponent + (128 - rhs.significand.leading_zeros()) as i32;
+
+            match lhs_top.cmp(&rhs_top) {
+                Ordering::Equal => {
+                    let exponent = self.exponent.min(rhs.exponent);
+
+                    let a = self.significand << (self.exponent - exponent) as u32;
+
+                    let b = rhs.significand << (rhs.exponent - exponent) as u32;
+
+                    a.cmp(&b)
+                }
+
+                ordering => ordering,
+            }
+        };
+
+        if self.negative {
+            magnitude.reverse()
+        } else {
+            magnitude
+        }
+    }
+}
+
+fn compare_dyadic_sum(lhs: Dyadic, rhs: Dyadic, candidate: Dyadic) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    // Covers binary64 finite values and
+    // the overflow threshold 2^1024.
+    const WORDS: usize = 34;
+    const BASE_EXPONENT: i32 = -1074;
+
+    fn accumulate(words: &mut [u64; WORDS], value: Dyadic) {
+        if value.significand == 0 {
+            return;
+        }
+
+        let mut significand = value.significand;
+        let mut bit = (value.exponent - BASE_EXPONENT) as usize;
+
+        while significand != 0 {
+            if significand & 1 != 0 {
+                let mut index = bit / 64;
+                let mut carry = 1u64 << (bit % 64);
+
+                loop {
+                    let (sum, overflow) = words[index].overflowing_add(carry);
+
+                    words[index] = sum;
+
+                    if !overflow {
+                        break;
+                    }
+
+                    index += 1;
+                    carry = 1;
+                }
+            }
+
+            significand >>= 1;
+            bit += 1;
+        }
+    }
+
+    let mut positive = [0u64; WORDS];
+    let mut negative = [0u64; WORDS];
+
+    for value in [lhs, rhs, candidate.negate()] {
+        if value.negative {
+            accumulate(&mut negative, value);
+        } else {
+            accumulate(&mut positive, value);
+        }
+    }
+
+    for index in (0..WORDS).rev() {
+        match positive[index].cmp(&negative[index]) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+
+    Ordering::Equal
+}
+
+fn compare_exact_double(
+    operation: &Operation,
+    lhs: Dyadic,
+    rhs: Dyadic,
+    candidate: Dyadic,
+) -> std::cmp::Ordering {
+    match operation {
+        Operation::AddD => compare_dyadic_sum(lhs, rhs, candidate),
+
+        Operation::SubD => compare_dyadic_sum(lhs, rhs.negate(), candidate),
+
+        Operation::MulD => lhs.multiply(rhs).compare(candidate),
+
+        Operation::DivD => {
+            let ordering = lhs.compare(candidate.multiply(rhs));
+
+            if rhs.negative {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        }
+
+        Operation::SqrtD => lhs.compare(candidate.multiply(candidate)),
+
+        _ => unreachable!(),
+    }
+}
+
+fn next_up_double(bits: u64) -> u64 {
+    let value = f64::from_bits(bits);
+
+    if value.is_nan() || value == f64::INFINITY {
+        return bits;
+    }
+
+    if value == 0.0 {
+        return 1;
+    }
+
+    if value.is_sign_negative() {
+        bits - 1
+    } else {
+        bits + 1
+    }
+}
+
+fn next_down_double(bits: u64) -> u64 {
+    let value = f64::from_bits(bits);
+
+    if value.is_nan() || value == f64::NEG_INFINITY {
+        return bits;
+    }
+
+    if value == 0.0 {
+        return 0x8000_0000_0000_0001;
+    }
+
+    if value.is_sign_negative() {
+        bits + 1
+    } else {
+        bits - 1
+    }
+}
+
+fn direct_double_rounding(bits: u64, ordering: std::cmp::Ordering, mode: RoundingMode) -> u64 {
+    use std::cmp::Ordering;
+
+    if ordering == Ordering::Equal {
+        return bits;
+    }
+
+    let negative = bits & 0x8000_0000_0000_0000 != 0;
+
+    match mode {
+        RoundingMode::NearestEven => bits,
+
+        RoundingMode::TowardPositive => {
+            if ordering == Ordering::Greater {
+                next_up_double(bits)
+            } else {
+                bits
+            }
+        }
+
+        RoundingMode::TowardNegative => {
+            if ordering == Ordering::Less {
+                next_down_double(bits)
+            } else {
+                bits
+            }
+        }
+
+        RoundingMode::TowardZero => {
+            if negative {
+                if ordering == Ordering::Greater {
+                    next_up_double(bits)
+                } else {
+                    bits
+                }
+            } else if ordering == Ordering::Less {
+                next_down_double(bits)
+            } else {
+                bits
+            }
+        }
+    }
+}
+
+pub fn rounded_double(
+    operation: &Operation,
+    lhs: u64,
+    rhs: u64,
+    mode: RoundingMode,
+) -> FpResult<u64> {
+    use std::cmp::Ordering;
+
+    let mut result = checked_double(operation, lhs, rhs);
+
+    if matches!(mode, RoundingMode::NearestEven) {
+        return result;
+    }
+
+    let a = f64::from_bits(lhs);
+    let b = f64::from_bits(rhs);
+
+    if !a.is_finite() || !b.is_finite() || result.exceptions & (FP_INVALID | FP_DIVIDE_BY_ZERO) != 0
+    {
+        return result;
+    }
+
+    let native = f64::from_bits(result.value);
+
+    // Signed zero from exact cancellation.
+    if native == 0.0 && result.exceptions == 0 {
+        let opposite_signs = match operation {
+            Operation::AddD => a.is_sign_negative() != b.is_sign_negative(),
+
+            Operation::SubD => a.is_sign_negative() == b.is_sign_negative(),
+
+            _ => false,
+        };
+
+        if opposite_signs && matches!(mode, RoundingMode::TowardNegative) {
+            result.value = 0x8000_0000_0000_0000;
+        }
+
+        return result;
+    }
+
+    if result.exceptions & FP_INEXACT == 0 {
+        return result;
+    }
+
+    let exact_a = Dyadic::from_f64(a);
+    let exact_b = Dyadic::from_f64(b);
+
+    let negative = native.is_sign_negative();
+
+    // Native nearest-even overflow.
+    if native.is_infinite() {
+        let saturate = match mode {
+            RoundingMode::TowardZero => true,
+
+            RoundingMode::TowardPositive => negative,
+
+            RoundingMode::TowardNegative => !negative,
+
+            RoundingMode::NearestEven => false,
+        };
+
+        if saturate {
+            result.value = if negative {
+                0xFFEF_FFFF_FFFF_FFFF
+            } else {
+                0x7FEF_FFFF_FFFF_FFFF
+            };
+
+            // 2^1024 cannot be represented as f64.
+            // Construct it directly as a Dyadic.
+            let threshold = Dyadic::new(negative, 1, 1024);
+
+            let ordering = compare_exact_double(operation, exact_a, exact_b, threshold);
+
+            let overflow = if negative {
+                ordering != Ordering::Greater
+            } else {
+                ordering != Ordering::Less
+            };
+
+            result.exceptions = FP_INEXACT;
+
+            if overflow {
+                result.exceptions |= FP_OVERFLOW;
+            }
+        }
+
+        return result;
+    }
+
+    let candidate = Dyadic::from_f64(native);
+
+    let ordering = compare_exact_double(operation, exact_a, exact_b, candidate);
+
+    result.value = direct_double_rounding(result.value, ordering, mode);
+
+    let rounded = f64::from_bits(result.value);
+
+    result.exceptions = FP_INEXACT;
+
+    if rounded.is_infinite() {
+        result.exceptions |= FP_OVERFLOW;
+    } else if rounded.abs() < f64::MIN_POSITIVE {
+        result.exceptions |= FP_UNDERFLOW;
+    }
+
+    result
+}
+
+pub fn rounded_double_unary(
+    operation: &Operation,
+    operand: u64,
+    mode: RoundingMode,
+) -> FpResult<u64> {
+    let mut result = checked_double_unary(operation, operand);
+
+    if !matches!(operation, Operation::SqrtD)
+        || matches!(mode, RoundingMode::NearestEven)
+        || result.exceptions & FP_INEXACT == 0
+    {
+        return result;
+    }
+
+    let x = Dyadic::from_f64(f64::from_bits(operand));
+
+    let r = Dyadic::from_f64(f64::from_bits(result.value));
+
+    let ordering = x.compare(r.multiply(r));
+
+    result.value = direct_double_rounding(result.value, ordering, mode);
+
+    result
+}
+
+fn round_f64_to_single(value: f64, mode: RoundingMode) -> FpResult<u32> {
+    use std::cmp::Ordering;
+
+    debug_assert!(!value.is_nan());
+
+    let native = value as f32;
+
+    if value.is_infinite() {
+        return FpResult {
+            value: native.to_bits(),
+            exceptions: 0,
+        };
+    }
+
+    // Exactly representable in binary32.
+    if native as f64 == value {
+        return FpResult {
+            value: native.to_bits(),
+            exceptions: 0,
+        };
+    }
+
+    let mut bits = native.to_bits();
+
+    // Native nearest-even overflow.
+    if native.is_infinite() {
+        let negative = value.is_sign_negative();
+
+        let saturate = match mode {
+            RoundingMode::NearestEven => false,
+            RoundingMode::TowardZero => true,
+            RoundingMode::TowardPositive => negative,
+            RoundingMode::TowardNegative => !negative,
+        };
+
+        if saturate {
+            bits = if negative { 0xFF7F_FFFF } else { 0x7F7F_FFFF };
+
+            let overflow = value.abs() >= 2.0f64.powi(128);
+
+            return FpResult {
+                value: bits,
+                exceptions: FP_INEXACT | if overflow { FP_OVERFLOW } else { 0 },
+            };
+        }
+
+        return FpResult {
+            value: bits,
+            exceptions: FP_OVERFLOW | FP_INEXACT,
+        };
+    }
+
+    let ordering = value
+        .partial_cmp(&(native as f64))
+        .unwrap_or(Ordering::Equal);
+
+    bits = direct_single_rounding(bits, ordering, mode);
+
+    let rounded = f32::from_bits(bits);
+
+    let exceptions = if rounded.is_infinite() {
+        FP_OVERFLOW | FP_INEXACT
+    } else if rounded.abs() < f32::MIN_POSITIVE {
+        FP_UNDERFLOW | FP_INEXACT
+    } else {
+        FP_INEXACT
+    };
+
+    FpResult {
+        value: bits,
+        exceptions,
+    }
+}
+
+pub fn rounded_double_to_single(operand: u64, mode: RoundingMode) -> FpResult<u32> {
+    let value = f64::from_bits(operand);
+
+    if value.is_nan() {
+        return FpResult {
+            value: LEGACY_QNAN_SINGLE,
+
+            exceptions: if is_signaling_nan_double(operand) {
+                FP_INVALID
+            } else {
+                0
+            },
+        };
+    }
+
+    round_f64_to_single(value, mode)
+}
+
+pub fn checked_single_to_double(operand: u32) -> FpResult<u64> {
+    let value = f32::from_bits(operand);
+
+    if value.is_nan() {
+        return FpResult {
+            value: LEGACY_QNAN_DOUBLE,
+
+            exceptions: if is_signaling_nan_single(operand) {
+                FP_INVALID
+            } else {
+                0
+            },
+        };
+    }
+
+    FpResult {
+        value: convert_single_to_double(operand),
+        exceptions: 0,
+    }
+}
+
+pub fn rounded_word_to_single(operand: u32, mode: RoundingMode) -> FpResult<u32> {
+    let value = operand as i32 as f64;
+
+    round_f64_to_single(value, mode)
+}
+
+pub fn checked_word_to_double(operand: u32) -> FpResult<u64> {
+    FpResult {
+        value: convert_word_to_double(operand),
+        exceptions: 0,
+    }
+}
