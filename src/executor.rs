@@ -12,9 +12,10 @@ use crate::exception::Exception;
 use crate::mmu::AccessType;
 
 use crate::fpu::{
-    RoundingMode, compute_double, compute_double_unary, compute_single, compute_single_unary,
-    convert_double_to_single, convert_double_to_word, convert_single_to_double,
-    convert_single_to_word, convert_word_to_double, convert_word_to_single,
+    RoundingMode, compare_double, compare_single, compute_double, compute_double_unary,
+    compute_single, compute_single_unary, convert_double_to_single, convert_double_to_word,
+    convert_single_to_double, convert_single_to_word, convert_word_to_double,
+    convert_word_to_single,
 };
 
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
@@ -932,20 +933,51 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             cpu.cp1_mut().write_doubleword(fd, result);
         }
 
-        Operation::CvtWS | Operation::CvtWD => {
+        Operation::CvtWS
+        | Operation::CvtWD
+        | Operation::RoundWS
+        | Operation::RoundWD
+        | Operation::TruncWS
+        | Operation::TruncWD
+        | Operation::CeilWS
+        | Operation::CeilWD
+        | Operation::FloorWS
+        | Operation::FloorWD => {
             let fs = inst.fs() as usize;
             let fd = inst.fd() as usize;
 
-            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+            let mode = match operation {
+                Operation::CvtWS | Operation::CvtWD => {
+                    RoundingMode::from_fcsr(cpu.cp1().rounding_mode())
+                }
+
+                Operation::RoundWS | Operation::RoundWD => RoundingMode::NearestEven,
+
+                Operation::TruncWS | Operation::TruncWD => RoundingMode::TowardZero,
+
+                Operation::CeilWS | Operation::CeilWD => RoundingMode::TowardPositive,
+
+                Operation::FloorWS | Operation::FloorWD => RoundingMode::TowardNegative,
+
+                _ => unreachable!(),
+            };
 
             let result = match operation {
-                Operation::CvtWS => {
+                Operation::CvtWS
+                | Operation::RoundWS
+                | Operation::TruncWS
+                | Operation::CeilWS
+                | Operation::FloorWS => {
                     let operand = cpu.cp1().read_word(fs);
 
                     convert_single_to_word(operand, mode)
                 }
 
-                Operation::CvtWD => {
+                Operation::CvtWD
+                | Operation::RoundWD
+                | Operation::TruncWD
+                | Operation::CeilWD
+                | Operation::FloorWD => {
                     let Some(operand) = cpu.cp1().read_doubleword(fs) else {
                         cpu.raise_exception(Exception::ReservedInstruction, None);
 
@@ -967,6 +999,82 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
 
             cpu.cp1_mut().write_word(fd, result.value);
+        }
+
+        Operation::CFS
+        | Operation::CUnS
+        | Operation::CEqS
+        | Operation::CUeqS
+        | Operation::COltS
+        | Operation::CUltS
+        | Operation::COleS
+        | Operation::CUleS
+        | Operation::CSfS
+        | Operation::CNgleS
+        | Operation::CSeqS
+        | Operation::CNglS
+        | Operation::CLtS
+        | Operation::CNgeS
+        | Operation::CLeS
+        | Operation::CNgtS
+        | Operation::CFD
+        | Operation::CUnD
+        | Operation::CEqD
+        | Operation::CUeqD
+        | Operation::COltD
+        | Operation::CUltD
+        | Operation::COleD
+        | Operation::CUleD
+        | Operation::CSfD
+        | Operation::CNgleD
+        | Operation::CSeqD
+        | Operation::CNglD
+        | Operation::CLtD
+        | Operation::CNgeD
+        | Operation::CLeD
+        | Operation::CNgtD => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+
+            let cc = inst.compare_cc();
+            let cond = inst.compare_cond();
+
+            let result = match inst.fmt() {
+                // Single precision
+                0x10 => {
+                    let lhs = cpu.cp1().read_word(fs);
+                    let rhs = cpu.cp1().read_word(ft);
+
+                    compare_single(lhs, rhs, cond)
+                }
+
+                // Double precision
+                0x11 => {
+                    let Some(lhs) = cpu.cp1().read_doubleword(fs) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    let Some(rhs) = cpu.cp1().read_doubleword(ft) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    compare_double(lhs, rhs, cond)
+                }
+
+                _ => unreachable!(),
+            };
+
+            if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_fcc(cc, result.condition);
         }
 
         Operation::Cfc1 => {

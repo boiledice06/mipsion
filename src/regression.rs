@@ -5841,3 +5841,462 @@ fn cvt_w_access_validation() {
         assert_eq!(cpu.cp1().read_fcsr(), 0);
     }
 }
+
+#[test]
+fn cp1_explicit_rounding_single() {
+    for (funct, value, expected) in [
+        (0x0C, 2.5f32, 2i32),
+        (0x0C, 3.5, 4),
+        (0x0C, -3.5, -4),
+        (0x0D, 2.9, 2),
+        (0x0D, -2.9, -2),
+        (0x0E, 2.1, 3),
+        (0x0E, -2.9, -2),
+        (0x0F, 2.9, 2),
+        (0x0F, -2.1, -3),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_word(3, value.to_bits());
+
+        memory.write_word(0, encode_r(0x11, 0x10, 0, 3, 5, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(5), expected as u32,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), (1 << 12) | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_double() {
+    for (funct, value, expected) in [
+        (0x0C, 2.5f64, 2i32),
+        (0x0C, 3.5, 4),
+        (0x0C, -3.5, -4),
+        (0x0D, 2.9, 2),
+        (0x0D, -2.9, -2),
+        (0x0E, 2.1, 3),
+        (0x0E, -2.9, -2),
+        (0x0F, 2.9, 2),
+        (0x0F, -2.1, -3),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_doubleword(2, value.to_bits());
+
+        memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 5, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(5), expected as u32,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), (1 << 12) | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_ignores_fcsr_rm() {
+    for fmt in [0x10, 0x11] {
+        for rm in 0..4 {
+            for (funct, expected) in [(0x0C, 4u32), (0x0D, 3), (0x0E, 4), (0x0F, 3)] {
+                let mut cpu = Cpu::new();
+                let mut memory = Memory::new(4);
+
+                cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+                cpu.cp1_mut().write_control(31, rm);
+
+                if fmt == 0x10 {
+                    cpu.cp1_mut().write_word(2, 3.5f32.to_bits());
+                } else {
+                    cpu.cp1_mut().write_doubleword(2, 3.5f64.to_bits());
+                }
+
+                memory.write_word(0, encode_r(0x11, fmt, 0, 2, 4, funct));
+
+                cpu.step(&mut memory);
+
+                assert_eq!(cpu.cp1().read_word(4), expected,);
+
+                assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 12) | (1 << 2),);
+
+                assert!(!cpu.cp0().exception_level());
+            }
+        }
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_invalid() {
+    for fmt in [0x10, 0x11] {
+        for funct in 0x0C..=0x0F {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            if fmt == 0x10 {
+                cpu.cp1_mut().write_word(2, f32::INFINITY.to_bits());
+            } else {
+                cpu.cp1_mut().write_doubleword(2, f64::INFINITY.to_bits());
+            }
+
+            memory.write_word(0, encode_r(0x11, fmt, 0, 2, 4, funct));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp1().read_word(4), 0x7FFF_FFFF,);
+
+            assert_eq!(cpu.cp1().read_fcsr(), (1 << 16) | (1 << 6),);
+
+            assert!(!cpu.cp0().exception_level());
+        }
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_enabled_exception() {
+    for fmt in [0x10, 0x11] {
+        for funct in 0x0C..=0x0F {
+            for (invalid, enable, cause) in [(false, 1 << 7, 1 << 12), (true, 1 << 11, 1 << 16)] {
+                let mut cpu = Cpu::new();
+                let mut memory = Memory::new(4);
+
+                cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+                cpu.cp1_mut().write_control(31, enable);
+
+                let value = if invalid { f64::INFINITY } else { 2.5 };
+
+                if fmt == 0x10 {
+                    cpu.cp1_mut().write_word(2, (value as f32).to_bits());
+                } else {
+                    cpu.cp1_mut().write_doubleword(2, value.to_bits());
+                }
+
+                cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+                memory.write_word(0, encode_r(0x11, fmt, 0, 2, 4, funct));
+
+                cpu.step(&mut memory);
+
+                assert_eq!(cpu.cp0().exception_code(), 15,);
+
+                assert_eq!(cpu.cp0().read_epc(), 0,);
+
+                assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF,);
+
+                assert_eq!(cpu.cp1().read_fcsr(), enable | cause,);
+            }
+        }
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_disabled() {
+    for fmt in [0x10, 0x11] {
+        for funct in 0x0C..=0x0F {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+            memory.write_word(0, encode_r(0x11, fmt, 0, 2, 4, funct));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp0().exception_code(), 11,);
+
+            assert_eq!(cpu.cp0().coprocessor_error(), 1,);
+
+            assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF,);
+
+            assert_eq!(cpu.cp1().read_fcsr(), 0);
+        }
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_invalid_double_source() {
+    for funct in 0x0C..=0x0F {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, 0x11, 0, 3, 4, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 10);
+
+        assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), 0);
+    }
+}
+
+#[test]
+fn cp1_explicit_rounding_exact() {
+    for fmt in [0x10, 0x11] {
+        for funct in 0x0C..=0x0F {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            if fmt == 0x10 {
+                cpu.cp1_mut().write_word(2, (-42.0f32).to_bits());
+            } else {
+                cpu.cp1_mut().write_doubleword(2, (-42.0f64).to_bits());
+            }
+
+            memory.write_word(0, encode_r(0x11, fmt, 0, 2, 4, funct));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp1().read_word(4), (-42i32) as u32,);
+
+            assert_eq!(cpu.cp1().read_fcsr(), 0);
+            assert!(!cpu.cp0().exception_level());
+        }
+    }
+}
+
+fn encode_fp_compare(fmt: u8, fs: u8, ft: u8, cc: u8, cond: u8) -> u32 {
+    (0x11u32 << 26)
+        | (u32::from(fmt) << 21)
+        | (u32::from(ft) << 16)
+        | (u32::from(fs) << 11)
+        | (u32::from(cc) << 8)
+        | 0x30
+        | u32::from(cond)
+}
+
+#[test]
+fn cp1_fcc_register_mapping() {
+    let mut cpu = Cpu::new();
+
+    for cc in 0..8u8 {
+        cpu.cp1_mut().write_fcc(cc, true);
+
+        assert!(cpu.cp1().read_fcc(cc));
+    }
+
+    assert_eq!(cpu.cp1().read_control(25), Some(0xFF),);
+
+    assert_eq!(cpu.cp1().read_fcsr(), 0xFE80_0000,);
+
+    for cc in 0..8u8 {
+        cpu.cp1_mut().write_fcc(cc, false);
+
+        assert!(!cpu.cp1().read_fcc(cc));
+    }
+
+    assert_eq!(cpu.cp1().read_fcsr(), 0);
+}
+
+#[test]
+fn cp1_compare_all_conditions() {
+    for fmt in [0x10, 0x11] {
+        for cond in 0..16u8 {
+            for (lhs, rhs, relation) in [
+                (1.0f64, 2.0f64, 4u8),
+                (2.0, 2.0, 2),
+                (3.0, 2.0, 0),
+                (-0.0, 0.0, 2),
+            ] {
+                let mut cpu = Cpu::new();
+                let mut memory = Memory::new(4);
+
+                cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+                if fmt == 0x10 {
+                    cpu.cp1_mut().write_word(2, (lhs as f32).to_bits());
+
+                    cpu.cp1_mut().write_word(4, (rhs as f32).to_bits());
+                } else {
+                    cpu.cp1_mut().write_doubleword(2, lhs.to_bits());
+
+                    cpu.cp1_mut().write_doubleword(4, rhs.to_bits());
+                }
+
+                memory.write_word(0, encode_fp_compare(fmt, 2, 4, 3, cond));
+
+                cpu.step(&mut memory);
+
+                assert_eq!(
+                    cpu.cp1().read_fcc(3),
+                    cond & relation != 0,
+                    "fmt={fmt:#x}, cond={cond:#x}",
+                );
+
+                assert!(!cpu.cp0().exception_level());
+            }
+        }
+    }
+}
+
+#[test]
+fn cp1_compare_all_fcc_destinations() {
+    for fmt in [0x10, 0x11] {
+        for cc in 0..8u8 {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            // 초기 FPR 값은 모두 zero
+            // C.EQ.S / C.EQ.D
+            memory.write_word(0, encode_fp_compare(fmt, 2, 4, cc, 2));
+
+            cpu.step(&mut memory);
+
+            for other in 0..8u8 {
+                assert_eq!(cpu.cp1().read_fcc(other), other == cc,);
+            }
+
+            assert!(!cpu.cp0().exception_level());
+        }
+    }
+}
+
+#[test]
+fn cp1_compare_legacy_nan() {
+    for fmt in [0x10, 0x11] {
+        for cond in 0..16u8 {
+            for signaling in [false, true] {
+                let mut cpu = Cpu::new();
+                let mut memory = Memory::new(4);
+
+                cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+                if fmt == 0x10 {
+                    let nan = if signaling { 0x7FC0_0000 } else { 0x7FBF_FFFF };
+
+                    cpu.cp1_mut().write_word(2, nan);
+                } else {
+                    let nan = if signaling {
+                        0x7FF8_0000_0000_0000
+                    } else {
+                        0x7FF7_FFFF_FFFF_FFFF
+                    };
+
+                    cpu.cp1_mut().write_doubleword(2, nan);
+                }
+
+                memory.write_word(0, encode_fp_compare(fmt, 2, 4, 0, cond));
+
+                cpu.step(&mut memory);
+
+                assert_eq!(cpu.cp1().read_fcc(0), cond & 1 != 0,);
+
+                let invalid = signaling || cond & 8 != 0;
+
+                let fcsr = cpu.cp1().read_fcsr();
+
+                assert_eq!(fcsr & (1 << 16) != 0, invalid,);
+
+                assert_eq!(fcsr & (1 << 6) != 0, invalid,);
+
+                assert!(!cpu.cp0().exception_level());
+            }
+        }
+    }
+}
+
+#[test]
+fn cp1_compare_trap_preserves_fcc() {
+    for fmt in [0x10, 0x11] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_control(31, 1 << 11);
+        cpu.cp1_mut().write_fcc(3, true);
+
+        if fmt == 0x10 {
+            cpu.cp1_mut().write_word(2, 0x7FC0_0000);
+        } else {
+            cpu.cp1_mut().write_doubleword(2, 0x7FF8_0000_0000_0000);
+        }
+
+        // C.EQ: unordered이면 false이지만
+        // trap 발생 시 기존 FCC는 유지되어야 한다.
+        memory.write_word(0, encode_fp_compare(fmt, 2, 4, 3, 2));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 15);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+        assert!(cpu.cp1().read_fcc(3));
+
+        let fcsr = cpu.cp1().read_fcsr();
+
+        assert_ne!(fcsr & (1 << 16), 0);
+        assert_eq!(fcsr & (1 << 6), 0);
+    }
+}
+
+#[test]
+fn cp1_compare_disabled() {
+    for fmt in [0x10, 0x11] {
+        for cond in 0..16u8 {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp1_mut().write_fcc(3, true);
+
+            let old_fcsr = cpu.cp1().read_fcsr();
+
+            memory.write_word(0, encode_fp_compare(fmt, 2, 4, 3, cond));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp0().exception_code(), 11,);
+
+            assert_eq!(cpu.cp0().coprocessor_error(), 1,);
+
+            assert_eq!(cpu.cp1().read_fcsr(), old_fcsr,);
+        }
+    }
+}
+
+#[test]
+fn cp1_compare_invalid_double_register() {
+    for cond in 0..16u8 {
+        for (fs, ft) in [(3, 4), (2, 5)] {
+            let mut cpu = Cpu::new();
+            let mut memory = Memory::new(4);
+
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+            cpu.cp1_mut().write_fcc(3, true);
+
+            let old_fcsr = cpu.cp1().read_fcsr();
+
+            memory.write_word(0, encode_fp_compare(0x11, fs, ft, 3, cond));
+
+            cpu.step(&mut memory);
+
+            assert_eq!(cpu.cp0().exception_code(), 10,);
+
+            assert_eq!(cpu.cp1().read_fcsr(), old_fcsr,);
+        }
+    }
+}

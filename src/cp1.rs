@@ -173,6 +173,28 @@ impl Cp1 {
         unimplemented || enabled_exception
     }
 
+    pub fn read_fcc(&self, cc: u8) -> bool {
+        assert!(cc < 8);
+
+        let bit = if cc == 0 { 23 } else { 24 + u32::from(cc) };
+
+        self.fcsr & (1 << bit) != 0
+    }
+
+    pub fn write_fcc(&mut self, cc: u8, value: bool) {
+        assert!(cc < 8);
+
+        let bit = if cc == 0 { 23 } else { 24 + u32::from(cc) };
+
+        let mask = 1u32 << bit;
+
+        if value {
+            self.fcsr |= mask;
+        } else {
+            self.fcsr &= !mask;
+        }
+    }
+
     pub fn rounding_mode(&self) -> u32 {
         self.fcsr & FCSR_RM_MASK
     }

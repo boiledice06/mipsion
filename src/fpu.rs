@@ -140,3 +140,65 @@ pub fn convert_single_to_word(operand: u32, mode: RoundingMode) -> WordConversio
 pub fn convert_double_to_word(operand: u64, mode: RoundingMode) -> WordConversion {
     convert_float_to_word(f64::from_bits(operand), mode)
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompareResult {
+    pub condition: bool,
+    pub exceptions: u32,
+}
+
+fn compare_float(lhs: f64, rhs: f64, signaling_nan: bool, cond: u8) -> CompareResult {
+    let unordered = lhs.is_nan() || rhs.is_nan();
+
+    let relation = if unordered {
+        0b001
+    } else if lhs == rhs {
+        0b010
+    } else if lhs < rhs {
+        0b100
+    } else {
+        0
+    };
+
+    let signaling_compare = cond & 0b1000 != 0;
+
+    let invalid = signaling_nan || (unordered && signaling_compare);
+
+    CompareResult {
+        condition: relation & cond & 0b111 != 0,
+
+        exceptions: if invalid { FP_INVALID } else { 0 },
+    }
+}
+
+// MIPS legacy NaN encoding
+fn is_signaling_nan_single(bits: u32) -> bool {
+    let exponent = bits & 0x7F80_0000;
+    let fraction = bits & 0x007F_FFFF;
+
+    exponent == 0x7F80_0000 && fraction != 0 && fraction & 0x0040_0000 != 0
+}
+
+fn is_signaling_nan_double(bits: u64) -> bool {
+    let exponent = bits & 0x7FF0_0000_0000_0000;
+    let fraction = bits & 0x000F_FFFF_FFFF_FFFF;
+
+    exponent == 0x7FF0_0000_0000_0000 && fraction != 0 && fraction & 0x0008_0000_0000_0000 != 0
+}
+
+pub fn compare_single(lhs: u32, rhs: u32, cond: u8) -> CompareResult {
+    let signaling = is_signaling_nan_single(lhs) || is_signaling_nan_single(rhs);
+
+    compare_float(
+        f32::from_bits(lhs) as f64,
+        f32::from_bits(rhs) as f64,
+        signaling,
+        cond,
+    )
+}
+
+pub fn compare_double(lhs: u64, rhs: u64, cond: u8) -> CompareResult {
+    let signaling = is_signaling_nan_double(lhs) || is_signaling_nan_double(rhs);
+
+    compare_float(f64::from_bits(lhs), f64::from_bits(rhs), signaling, cond)
+}

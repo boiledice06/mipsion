@@ -26,12 +26,12 @@ v0.3.0 (in development) — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 146 / 291 (50.17%) |
+| ISA entries with execution logic | 186 / 291 (63.92%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 78 |
-| Pending | 145 |
-| Regression tests | 293 / 293 passing |
+| Partially implemented | 118 |
+| Pending | 105 |
+| Regression tests | 308 / 308 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -66,6 +66,10 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Basic S/D/W format conversions
 - [x] FCSR rounding modes for CVT.W instructions
 - [x] Invalid/Inexact exception handling for CVT.W instructions
+- [x] Explicit word rounding instructions (ROUND/TRUNC/CEIL/FLOOR)
+- [x] All 32 single/double comparison instructions
+- [x] FCC0–7 condition code access
+- [x] Legacy NaN classification for comparisons
 - [ ] Floating-point unit
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -85,7 +89,7 @@ The functional emulation core is designed independently of the user interface.
 - `isa` — instruction definitions and operation types generated at build time
 - `decoder` — table-driven instruction identification
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
-- `fpu` — floating-point arithmetic, format conversion, rounding and exception results
+- `fpu` — floating-point arithmetic, format conversion, rounding, comparison and exception results
 - `executor` — instruction semantics and control flow
 - `cp0` — system registers, privilege, exceptions and interrupts
 - `cp1` — floating-point registers, control registers and data transfers
@@ -115,8 +119,9 @@ The current core is exercised through regression tests. A standalone program loa
 - CP0, TLB and exception behavior cover a limited architecture profile.
 - Cache behavior, execution hazards and full synchronization semantics are incomplete.
 - FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers, basic single- and double-precision arithmetic, and S/D/W format conversions.
-- FCSR rounding and Invalid/Inexact exception handling are currently implemented for CVT.W instructions only.
-- Explicit rounding instructions, comparisons, conditional operations and full IEEE 754 conformance remain incomplete.
+- FCSR rounding and Invalid/Inexact exception handling are implemented for CVT.W and explicit word rounding instructions.
+- Comparisons support legacy NaN classification and Invalid Operation handling.
+- Floating-point conditional branches, conditional moves and full IEEE 754 conformance remain incomplete.
 - CP1 feature advertisement and full exception conformance remain incomplete.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.

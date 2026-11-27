@@ -43,6 +43,14 @@ impl RawInstruction {
         self.extract(21, 5) as u8
     }
 
+    pub fn compare_cc(&self) -> u8 {
+        self.extract(8, 3) as u8
+    }
+
+    pub fn compare_cond(&self) -> u8 {
+        self.extract(0, 4) as u8
+    }
+
     pub fn shamt(&self) -> u8 {
         self.extract(6, 5) as u8
     }
