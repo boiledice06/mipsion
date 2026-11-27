@@ -172,4 +172,26 @@ impl Cp1 {
 
         unimplemented || enabled_exception
     }
+
+    pub fn rounding_mode(&self) -> u32 {
+        self.fcsr & FCSR_RM_MASK
+    }
+
+    pub fn apply_fp_exceptions(&mut self, exceptions: u32) -> bool {
+        let exceptions = exceptions & 0x3F;
+
+        // Cause: 이번 연산에서 발생한 예외
+        self.fcsr = (self.fcsr & !FCSR_CAUSE_MASK) | (exceptions << 12);
+
+        let enables = (self.fcsr >> 7) & 0x1F;
+
+        let trap = (exceptions & enables != 0) || (exceptions & 0x20 != 0);
+
+        // Flag: 비활성화된 예외의 누적 기록
+        if !trap {
+            self.fcsr |= (exceptions & 0x1F) << 2;
+        }
+
+        trap
+    }
 }

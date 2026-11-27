@@ -29,22 +29,22 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 140/291개(48.11%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 72개, 대기 151개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 259/259 통과했다.
+현재 실행 경로는 146/291개(50.17%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 78개, 대기 145개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 293/293 통과했다.
 
 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
 | 실행 상태 | 수 | 비율 |
 | --- | ---: | ---: |
 | 구현 | 68 | 23.37% |
-| 부분 | 72 | 24.74% |
-| 대기 | 151 | 51.89% |
-| 실행 경로 합계 | 140 | 48.11% |
+| 부분 | 78 | 26.80% |
+| 대기 | 145 | 49.83% |
+| 실행 경로 합계 | 146 | 50.17% |
 
 v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, timer/software interrupt, MMU, 32-entry TLB 및 TLB refill을 지원한다.
 
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
-v0.3.0 개발 중 (Batch 35-C): CP1 기반 구조, FPU 제어 레지스터, FR=0 레지스터 매핑, 32/64-bit 데이터 전송 및 단정밀도/배정밀도 기본 산술 명령어 16개를 지원한다. 형변환, 비교, FCSR rounding mode와 FP 산술 예외 처리는 후속 구현 대상이다.
+v0.3.0 개발 중 (Batch 36-C): CP1 기반 구조, FPU 제어 레지스터, FR=0 레지스터 매핑, 32/64-bit 데이터 전송, 기본 산술 명령어 16개 및 S/D/W 형변환 명령어 6개를 지원한다. CVT.W 계열은 FCSR의 네 가지 반올림 모드와 Invalid/Inexact 예외, sticky flag 및 예외 발생 시 destination writeback 억제를 지원한다. 전체 ISA 실행 경로가 50%를 넘어섰다.
 
 ## 작업 순서
 
@@ -167,18 +167,18 @@ v0.3.0 개발 중 (Batch 35-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `CTC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | — | `0xFFE007FF` | `0x44C00000` | `rt, fs` | CP1 rt → control register | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Division-by-zero, Inexact, Overflow, Underflow | 104 |
 | `CTC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48C00000` | `rt, rd` (예시) | CP2 rt → control register | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없으면 UNPREDICTABLE | 106 |
 | `CVT.D.L` | FPU 64 | 대기 | 대기 | `0x11` | `0x21` | `0xFFFF003F` | `0x46A00021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
-| `CVT.D.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x21` | `0xFFFF003F` | `0x46000021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
-| `CVT.D.W` | FPU 기본 | 대기 | 대기 | `0x11` | `0x21` | `0xFFFF003F` | `0x46800021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
+| `CVT.D.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x21` | `0xFFFF003F` | `0x46000021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
+| `CVT.D.W` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x21` | `0xFFFF003F` | `0x46800021` | `fd, fs` | FCSR rounding mode로 D 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact | 107 |
 | `CVT.L.D` | FPU 64 | 대기 | 대기 | `0x11` | `0x25` | `0xFFFF003F` | `0x46200025` | `fd, fs` | FCSR rounding mode로 L 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 108 |
 | `CVT.L.S` | FPU 64 | 대기 | 대기 | `0x11` | `0x25` | `0xFFFF003F` | `0x46000025` | `fd, fs` | FCSR rounding mode로 L 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 108 |
 | `CVT.PS.S` | FPU 64 | 대기 | 대기 | `0x11` | `0x26` | `0xFFE0003F` | `0x46000026` | `fd, fs, ft` | fs와 ft의 S 값을 PS의 상·하위 lane에 결합 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation | 109 |
-| `CVT.S.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x20` | `0xFFFF003F` | `0x46200020` | `fd, fs` | FCSR rounding mode로 S 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow, Underflow | 110 |
+| `CVT.S.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x20` | `0xFFFF003F` | `0x46200020` | `fd, fs` | FCSR rounding mode로 S 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow, Underflow | 110 |
 | `CVT.S.L` | FPU 64 | 대기 | 대기 | `0x11` | `0x20` | `0xFFFF003F` | `0x46A00020` | `fd, fs` | FCSR rounding mode로 S 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow, Underflow | 110 |
 | `CVT.S.PL` | FPU 64 | 대기 | 대기 | `0x11` | `0x28` | `0xFFFF003F` | `0x46C00028` | `fd, fs` | PS 하위 lane을 S로 추출 | Coprocessor Unusable, Reserved Instruction | 111 |
 | `CVT.S.PU` | FPU 64 | 대기 | 대기 | `0x11` | `0x20` | `0xFFFF003F` | `0x46C00020` | `fd, fs` | PS 상위 lane을 S로 추출 | Coprocessor Unusable, Reserved Instruction / FPU: 112 | 112 |
-| `CVT.S.W` | FPU 기본 | 대기 | 대기 | `0x11` | `0x20` | `0xFFFF003F` | `0x46800020` | `fd, fs` | FCSR rounding mode로 S 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow, Underflow | 110 |
-| `CVT.W.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x24` | `0xFFFF003F` | `0x46200024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
-| `CVT.W.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x24` | `0xFFFF003F` | `0x46000024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
+| `CVT.S.W` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x20` | `0xFFFF003F` | `0x46800020` | `fd, fs` | FCSR rounding mode로 S 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow, Underflow | 110 |
+| `CVT.W.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x24` | `0xFFFF003F` | `0x46200024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
+| `CVT.W.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x24` | `0xFFFF003F` | `0x46000024` | `fd, fs` | FCSR rounding mode로 W 형식 변환 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Unimplemented Operation, Inexact, Overflow | 113 |
 | `DERET` | EJTAG | 대기 | 대기 | `0x10` | `0x1F` | `0xFFFFFFFF` | `0x4200001F` | — | DEPC에서 실행을 재개하고 Debug Mode 종료 | Coprocessor Unusable Exception Reserved Instruction Exception. Debug Mode 외 실행 시 UNDEFINED | 114 |
 | `DI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606000` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 해제 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 115 |
 | `DIV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1A` | `0xFC00FFFF` | `0x0000001A` | `rs, rt` | signed 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 116 |

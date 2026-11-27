@@ -5258,3 +5258,586 @@ fn cp1_double_unary_chain() {
 
     assert!(!cpu.cp0().exception_level());
 }
+
+#[test]
+fn fpu_convert_single_to_double() {
+    use crate::fpu::convert_single_to_double;
+
+    assert_eq!(convert_single_to_double(1.5f32.to_bits()), 1.5f64.to_bits(),);
+}
+
+#[test]
+fn fpu_convert_double_to_single() {
+    use crate::fpu::convert_double_to_single;
+
+    assert_eq!(
+        convert_double_to_single(2.25f64.to_bits()),
+        2.25f32.to_bits(),
+    );
+}
+
+#[test]
+fn fpu_convert_single_preserves_numeric_value() {
+    use crate::fpu::convert_single_to_double;
+
+    let source = 0.1f32;
+
+    let result = f64::from_bits(convert_single_to_double(source.to_bits()));
+
+    assert_eq!(result, source as f64);
+    assert_ne!(result, 0.1f64);
+}
+
+#[test]
+fn fpu_convert_double_precision_loss() {
+    use crate::fpu::convert_double_to_single;
+
+    let result = convert_double_to_single(16_777_217.0f64.to_bits());
+
+    assert_eq!(result, 16_777_216.0f32.to_bits(),);
+}
+
+#[test]
+fn cvt_d_s_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(3, 1.5f32.to_bits());
+
+    // CVT.D.S $f4, $f3
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 3, 4, 0x21));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_doubleword(4), Some(1.5f64.to_bits()),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_s_d_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_doubleword(2, 2.25f64.to_bits());
+
+    // CVT.S.D $f5, $f2
+    memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 5, 0x20));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(5), 2.25f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_d_s_invalid_destination() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+    cpu.cp1_mut().write_word(31, 0xDEAD_BEEF);
+
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 31, 0x21));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp1().read_word(31), 0xDEAD_BEEF);
+}
+
+#[test]
+fn cvt_s_d_invalid_source() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+    memory.write_word(0, encode_r(0x11, 0x11, 0, 3, 6, 0x20));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF);
+}
+
+#[test]
+fn cp1_float_conversion_disabled() {
+    for (fmt, funct) in [(0x10, 0x21), (0x11, 0x20)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        let sentinel = 0x1234_5678_9ABC_DEF0;
+
+        cpu.cp1_mut().write_doubleword(6, sentinel);
+
+        memory.write_word(0, encode_r(0x11, fmt, 0, 2, 6, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.cp0().coprocessor_error(), 1);
+
+        assert_eq!(cpu.cp1().read_doubleword(6), Some(sentinel),);
+    }
+}
+
+#[test]
+fn cp1_float_conversion_round_trip() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(12);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    let value = 1.5f32.to_bits();
+
+    cpu.cp1_mut().write_word(3, value);
+
+    let program = [
+        // CVT.D.S $f4, $f3
+        encode_r(0x11, 0x10, 0, 3, 4, 0x21),
+        // ADD.D $f6, $f4, $f4
+        encode_r(0x11, 0x11, 4, 4, 6, 0),
+        // CVT.S.D $f7, $f6
+        encode_r(0x11, 0x11, 0, 6, 7, 0x20),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..3 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.cp1().read_doubleword(4), Some(1.5f64.to_bits()),);
+
+    assert_eq!(cpu.cp1().read_word(7), 3.0f32.to_bits(),);
+
+    assert_eq!(cpu.cp1().read_word(3), value);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_convert_word_to_single() {
+    use crate::fpu::convert_word_to_single;
+
+    assert_eq!(convert_word_to_single(42), 42.0f32.to_bits(),);
+}
+
+#[test]
+fn fpu_convert_word_to_double() {
+    use crate::fpu::convert_word_to_double;
+
+    assert_eq!(convert_word_to_double(42), 42.0f64.to_bits(),);
+}
+
+#[test]
+fn fpu_word_conversion_signed() {
+    use crate::fpu::{convert_word_to_double, convert_word_to_single};
+
+    for value in [-1i32, -42, -1024] {
+        assert_eq!(
+            convert_word_to_single(value as u32),
+            (value as f32).to_bits(),
+        );
+
+        assert_eq!(
+            convert_word_to_double(value as u32),
+            (value as f64).to_bits(),
+        );
+    }
+}
+
+#[test]
+fn fpu_word_conversion_boundaries() {
+    use crate::fpu::{convert_word_to_double, convert_word_to_single};
+
+    for value in [i32::MIN, i32::MAX, 0] {
+        assert_eq!(
+            convert_word_to_single(value as u32),
+            (value as f32).to_bits(),
+        );
+
+        assert_eq!(
+            convert_word_to_double(value as u32),
+            (value as f64).to_bits(),
+        );
+    }
+}
+
+#[test]
+fn fpu_word_conversion_precision() {
+    use crate::fpu::{convert_word_to_double, convert_word_to_single};
+
+    let value = 16_777_217u32;
+
+    assert_eq!(convert_word_to_single(value), 16_777_216.0f32.to_bits(),);
+
+    assert_eq!(convert_word_to_double(value), 16_777_217.0f64.to_bits(),);
+}
+
+#[test]
+fn cvt_s_w_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(3, (-42i32) as u32);
+
+    // CVT.S.W $f5, $f3
+    memory.write_word(0, encode_r(0x11, 0x14, 0, 3, 5, 0x20));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(5), (-42.0f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_d_w_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(3, (-42i32) as u32);
+
+    // CVT.D.W $f4, $f3
+    memory.write_word(0, encode_r(0x11, 0x14, 0, 3, 4, 0x21));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_doubleword(4), Some((-42.0f64).to_bits()),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_d_w_invalid_destination() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 42);
+    cpu.cp1_mut().write_word(31, 0xDEAD_BEEF);
+
+    memory.write_word(0, encode_r(0x11, 0x14, 0, 2, 31, 0x21));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp1().read_word(31), 0xDEAD_BEEF);
+}
+
+#[test]
+fn cp1_word_conversion_disabled() {
+    for funct in [0x20, 0x21] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        let sentinel = 0x1234_5678_9ABC_DEF0;
+
+        cpu.cp1_mut().write_word(2, 42);
+        cpu.cp1_mut().write_doubleword(4, sentinel);
+
+        memory.write_word(0, encode_r(0x11, 0x14, 0, 2, 4, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.cp0().coprocessor_error(), 1);
+
+        assert_eq!(cpu.cp1().read_doubleword(4), Some(sentinel),);
+    }
+}
+
+#[test]
+fn cp1_word_conversion_integration() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(20);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.write_reg(8, (-21i32) as u32);
+
+    let program = [
+        // MTC1 $8, $f2
+        encode_r(0x11, 4, 8, 2, 0, 0),
+        // CVT.S.W $f4, $f2
+        encode_r(0x11, 0x14, 0, 2, 4, 0x20),
+        // CVT.D.W $f6, $f2
+        encode_r(0x11, 0x14, 0, 2, 6, 0x21),
+        // ADD.D $f8, $f6, $f6
+        encode_r(0x11, 0x11, 6, 6, 8, 0),
+        // CVT.S.D $f10, $f8
+        encode_r(0x11, 0x11, 0, 8, 10, 0x20),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..5 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.cp1().read_word(4), (-21.0f32).to_bits(),);
+
+    assert_eq!(cpu.cp1().read_doubleword(6), Some((-21.0f64).to_bits()),);
+
+    assert_eq!(cpu.cp1().read_doubleword(8), Some((-42.0f64).to_bits()),);
+
+    assert_eq!(cpu.cp1().read_word(10), (-42.0f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_word_nearest_even() {
+    use crate::fpu::{RoundingMode, convert_double_to_word};
+
+    for (value, expected) in [(2.5f64, 2i32), (3.5, 4), (-2.5, -2), (-3.5, -4)] {
+        let result = convert_double_to_word(value.to_bits(), RoundingMode::NearestEven);
+
+        assert_eq!(result.value, expected as u32);
+    }
+}
+
+#[test]
+fn fpu_word_toward_zero() {
+    use crate::fpu::{RoundingMode, convert_double_to_word};
+
+    for (value, expected) in [(2.9f64, 2i32), (-2.9, -2)] {
+        let result = convert_double_to_word(value.to_bits(), RoundingMode::TowardZero);
+
+        assert_eq!(result.value, expected as u32);
+    }
+}
+
+#[test]
+fn fpu_word_toward_positive() {
+    use crate::fpu::{RoundingMode, convert_double_to_word};
+
+    for (value, expected) in [(2.1f64, 3i32), (-2.9, -2)] {
+        let result = convert_double_to_word(value.to_bits(), RoundingMode::TowardPositive);
+
+        assert_eq!(result.value, expected as u32);
+    }
+}
+
+#[test]
+fn fpu_word_toward_negative() {
+    use crate::fpu::{RoundingMode, convert_double_to_word};
+
+    for (value, expected) in [(2.9f64, 2i32), (-2.1, -3)] {
+        let result = convert_double_to_word(value.to_bits(), RoundingMode::TowardNegative);
+
+        assert_eq!(result.value, expected as u32);
+    }
+}
+
+#[test]
+fn fpu_word_conversion_exact() {
+    use crate::fpu::{RoundingMode, convert_double_to_word};
+
+    for value in [i32::MIN, i32::MAX, -42, 0, 42] {
+        let result = convert_double_to_word((value as f64).to_bits(), RoundingMode::NearestEven);
+
+        assert_eq!(result.value, value as u32);
+        assert_eq!(result.exceptions, 0);
+    }
+}
+
+#[test]
+fn fpu_word_conversion_inexact() {
+    use crate::fpu::{FP_INEXACT, RoundingMode, convert_single_to_word};
+
+    let result = convert_single_to_word(2.5f32.to_bits(), RoundingMode::NearestEven);
+
+    assert_eq!(result.value, 2);
+    assert_eq!(result.exceptions, FP_INEXACT);
+}
+
+#[test]
+fn fpu_word_conversion_invalid() {
+    use crate::fpu::{FP_INVALID, RoundingMode, convert_double_to_word};
+
+    for value in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        2_147_483_648.0,
+        -2_147_483_649.0,
+    ] {
+        let result = convert_double_to_word(value.to_bits(), RoundingMode::NearestEven);
+
+        assert_eq!(result.value, 0x7FFF_FFFF);
+        assert_eq!(result.exceptions, FP_INVALID);
+    }
+}
+
+#[test]
+fn fpu_word_conversion_rounded_boundary() {
+    use crate::fpu::{FP_INEXACT, FP_INVALID, RoundingMode, convert_double_to_word};
+
+    let value = 2_147_483_647.5f64.to_bits();
+
+    let nearest = convert_double_to_word(value, RoundingMode::NearestEven);
+
+    let truncated = convert_double_to_word(value, RoundingMode::TowardZero);
+
+    assert_eq!(nearest.exceptions, FP_INVALID);
+
+    assert_eq!(truncated.value, 0x7FFF_FFFF);
+    assert_eq!(truncated.exceptions, FP_INEXACT);
+}
+
+#[test]
+fn cvt_w_s_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(3, 3.5f32.to_bits());
+
+    // CVT.W.S $f5, $f3
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 3, 5, 0x24));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(5), 4);
+
+    // Cause.I and Flag.I
+    assert_eq!(cpu.cp1().read_fcsr(), (1 << 12) | (1 << 2),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_w_d_all_rounding_modes() {
+    for (rm, expected) in [(0, -2i32), (1, -2), (2, -2), (3, -3)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_control(31, rm);
+
+        cpu.cp1_mut().write_doubleword(2, (-2.5f64).to_bits());
+
+        // CVT.W.D $f5, $f2
+        memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 5, 0x24));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp1().read_word(5), expected as u32,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), rm | (1 << 12) | (1 << 2),);
+
+        assert!(!cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn cvt_w_invalid_disabled() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_doubleword(2, f64::INFINITY.to_bits());
+
+    memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 4, 0x24));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), 0x7FFF_FFFF);
+
+    assert_eq!(cpu.cp1().read_fcsr(), (1 << 16) | (1 << 6),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cvt_w_enabled_exception_no_writeback() {
+    for (value, enable, cause) in [(2.5f64, 1 << 7, 1 << 12), (f64::INFINITY, 1 << 11, 1 << 16)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        cpu.cp1_mut().write_control(31, enable);
+
+        cpu.cp1_mut().write_doubleword(2, value.to_bits());
+
+        cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 4, 0x24));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 15);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+
+        assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), enable | cause,);
+    }
+}
+
+#[test]
+fn cp1_fp_flags_sticky() {
+    use crate::fpu::FP_INEXACT;
+
+    let mut cpu = Cpu::new();
+
+    assert!(!cpu.cp1_mut().apply_fp_exceptions(FP_INEXACT));
+
+    assert_eq!(cpu.cp1().read_fcsr(), (1 << 12) | (1 << 2),);
+
+    assert!(!cpu.cp1_mut().apply_fp_exceptions(0));
+
+    assert_eq!(cpu.cp1().read_fcsr(), 1 << 2,);
+}
+
+#[test]
+fn cvt_w_access_validation() {
+    for (enabled, fmt, fs, expected) in [
+        (false, 0x10, 2, 11),
+        (false, 0x11, 2, 11),
+        (true, 0x11, 3, 10),
+    ] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        if enabled {
+            cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+        }
+
+        cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, fmt, 0, fs, 4, 0x24));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), expected,);
+
+        assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF,);
+
+        assert_eq!(cpu.cp1().read_fcsr(), 0);
+    }
+}

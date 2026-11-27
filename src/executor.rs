@@ -11,7 +11,11 @@ use crate::exception::Exception;
 
 use crate::mmu::AccessType;
 
-use crate::fpu::{compute_double, compute_double_unary, compute_single, compute_single_unary};
+use crate::fpu::{
+    RoundingMode, compute_double, compute_double_unary, compute_single, compute_single_unary,
+    convert_double_to_single, convert_double_to_word, convert_single_to_double,
+    convert_single_to_word, convert_word_to_double, convert_word_to_single,
+};
 
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     // CP0 및 TLB 명령어 접근 권한 검사
@@ -859,6 +863,110 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let result = compute_double_unary(operation, operand);
 
             cpu.cp1_mut().write_doubleword(fd, result);
+        }
+
+        Operation::CvtDS => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            // Destination: doubleword
+            if !cpu.cp1().valid_double_register(fd) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let operand = cpu.cp1().read_word(fs);
+
+            let result = convert_single_to_double(operand);
+
+            cpu.cp1_mut().write_doubleword(fd, result);
+        }
+
+        Operation::CvtSD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            // Source: doubleword
+            if !cpu.cp1().valid_double_register(fs) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let operand = cpu
+                .cp1()
+                .read_doubleword(fs)
+                .expect("validated source register");
+
+            let result = convert_double_to_single(operand);
+
+            cpu.cp1_mut().write_word(fd, result);
+        }
+
+        Operation::CvtSW => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let operand = cpu.cp1().read_word(fs);
+
+            let result = convert_word_to_single(operand);
+
+            cpu.cp1_mut().write_word(fd, result);
+        }
+
+        Operation::CvtDW => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            if !cpu.cp1().valid_double_register(fd) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let operand = cpu.cp1().read_word(fs);
+
+            let result = convert_word_to_double(operand);
+
+            cpu.cp1_mut().write_doubleword(fd, result);
+        }
+
+        Operation::CvtWS | Operation::CvtWD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
+
+            let result = match operation {
+                Operation::CvtWS => {
+                    let operand = cpu.cp1().read_word(fs);
+
+                    convert_single_to_word(operand, mode)
+                }
+
+                Operation::CvtWD => {
+                    let Some(operand) = cpu.cp1().read_doubleword(fs) else {
+                        cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                        return;
+                    };
+
+                    convert_double_to_word(operand, mode)
+                }
+
+                _ => unreachable!(),
+            };
+
+            let trap = cpu.cp1_mut().apply_fp_exceptions(result.exceptions);
+
+            if trap {
+                cpu.raise_exception(Exception::FloatingPoint, None);
+
+                return;
+            }
+
+            cpu.cp1_mut().write_word(fd, result.value);
         }
 
         Operation::Cfc1 => {
