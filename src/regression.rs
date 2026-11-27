@@ -3917,3 +3917,720 @@ fn swc1_clears_reservation() {
     assert!(!cpu.check_reservation(32));
     assert!(!cpu.cp0().exception_level());
 }
+
+#[test]
+fn memory_doubleword_read() {
+    let mut memory = Memory::new(64);
+
+    memory.write_word(32, 0x5444_2D18);
+    memory.write_word(36, 0x4009_21FB);
+
+    assert_eq!(memory.read_doubleword(32), 0x4009_21FB_5444_2D18,);
+}
+
+#[test]
+fn memory_doubleword_write() {
+    let mut memory = Memory::new(64);
+
+    memory.write_doubleword(32, 0x1234_5678_9ABC_DEF0);
+
+    assert_eq!(memory.read_word(32), 0x9ABC_DEF0);
+    assert_eq!(memory.read_word(36), 0x1234_5678);
+
+    let expected = [0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12];
+
+    for (index, value) in expected.into_iter().enumerate() {
+        assert_eq!(memory.read_byte(32 + index as u32), value,);
+    }
+}
+
+#[test]
+fn ldc1_doubleword_load() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+    cpu.write_reg(8, 32);
+
+    memory.write_doubleword(32, 0x4009_21FB_5444_2D18);
+
+    // LDC1 $f2, 0($8)
+    memory.write_word(0, i(0x35, 8, 2, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(2), 0x5444_2D18);
+    assert_eq!(cpu.cp1().read_word(3), 0x4009_21FB);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn sdc1_doubleword_store() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+    cpu.write_reg(8, 32);
+
+    cpu.cp1_mut().write_doubleword(2, 0x1234_5678_9ABC_DEF0);
+
+    // SDC1 $f2, 0($8)
+    memory.write_word(0, i(0x3D, 8, 2, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_doubleword(32), 0x1234_5678_9ABC_DEF0,);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_doubleword_memory_round_trip() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+    cpu.write_reg(8, 40);
+
+    let value = 0x7FF8_1234_5678_9ABC;
+
+    cpu.cp1_mut().write_doubleword(2, value);
+
+    // SDC1 $f2, -8($8)
+    memory.write_word(0, i(0x3D, 8, 2, (-8i16) as u16));
+
+    // LDC1 $f30, -8($8)
+    memory.write_word(4, i(0x35, 8, 30, (-8i16) as u16));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(memory.read_doubleword(32), value);
+
+    assert_eq!(cpu.cp1().read_doubleword(30), Some(value),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn ldc1_alignment_exception() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    // Word aligned, but not doubleword aligned
+    cpu.write_reg(8, 36);
+
+    let value = 0x1234_5678_9ABC_DEF0;
+
+    cpu.cp1_mut().write_doubleword(2, value);
+
+    memory.write_word(0, i(0x35, 8, 2, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 4);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 36);
+
+    assert_eq!(cpu.cp1().read_doubleword(2), Some(value),);
+}
+
+#[test]
+fn sdc1_alignment_exception() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+    cpu.write_reg(8, 36);
+
+    cpu.cp1_mut().write_doubleword(2, u64::MAX);
+
+    memory.write_word(0, i(0x3D, 8, 2, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 5);
+    assert_eq!(cpu.cp0().read_bad_vaddr(), 36);
+
+    assert_eq!(memory.read_doubleword(32), 0);
+    assert_eq!(memory.read_doubleword(40), 0);
+}
+
+#[test]
+fn cp1_doubleword_memory_odd_register_rejected() {
+    for opcode in [0x35, 0x3D] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(64);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+        cpu.write_reg(8, 32);
+
+        memory.write_doubleword(32, 0x1234_5678_9ABC_DEF0);
+
+        // Invalid doubleword register in FR=0
+        memory.write_word(0, i(opcode, 8, 31, 0));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 10);
+
+        assert_eq!(cpu.cp1().read_raw(31), 0);
+
+        assert_eq!(memory.read_doubleword(32), 0x1234_5678_9ABC_DEF0,);
+    }
+}
+
+#[test]
+fn cp1_doubleword_memory_tlb_refill() {
+    for (opcode, exception_code) in [(0x35, 2), (0x3D, 3)] {
+        let mut cpu = Cpu::new_with_tlb();
+        let mut memory = Memory::new(64);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+        cpu.write_pc(0x8000_0000);
+        cpu.write_reg(8, 0x0040_0000);
+
+        let value = 0xAAAA_BBBB_CCCC_DDDD;
+
+        cpu.cp1_mut().write_doubleword(2, value);
+
+        memory.write_word(0, i(opcode, 8, 2, 0));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), exception_code,);
+
+        assert_eq!(cpu.cp0().read_bad_vaddr(), 0x0040_0000,);
+
+        assert_eq!(cpu.cp0().read_epc(), 0x8000_0000,);
+
+        assert_eq!(cpu.cp1().read_doubleword(2), Some(value),);
+
+        assert_eq!(memory.read_doubleword(32), 0);
+    }
+}
+
+#[test]
+fn sdc1_clears_reservation() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+    cpu.write_reg(8, 32);
+
+    cpu.set_reservation(32);
+
+    cpu.cp1_mut().write_doubleword(2, 0x1234_5678_9ABC_DEF0);
+
+    memory.write_word(0, i(0x3D, 8, 2, 0));
+
+    assert!(cpu.check_reservation(32));
+
+    cpu.step(&mut memory);
+
+    assert!(!cpu.check_reservation(32));
+
+    assert_eq!(memory.read_doubleword(32), 0x1234_5678_9ABC_DEF0,);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_single_add() {
+    use crate::fpu::compute_single;
+    use crate::isa::Operation;
+
+    let result = compute_single(&Operation::AddS, 1.5f32.to_bits(), 2.25f32.to_bits());
+
+    assert_eq!(result, 3.75f32.to_bits());
+}
+
+#[test]
+fn fpu_single_sub() {
+    use crate::fpu::compute_single;
+    use crate::isa::Operation;
+
+    let result = compute_single(&Operation::SubS, 1.5f32.to_bits(), 2.25f32.to_bits());
+
+    assert_eq!(result, (-0.75f32).to_bits());
+}
+
+#[test]
+fn adds_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+    cpu.cp1_mut().write_word(4, 2.25f32.to_bits());
+
+    // ADD.S $f6, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), 3.75f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn subs_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+    cpu.cp1_mut().write_word(4, 2.25f32.to_bits());
+
+    // SUB.S $f6, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 1));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), (-0.75f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn adds_negative_operands() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, (-3.5f32).to_bits());
+
+    cpu.cp1_mut().write_word(4, (-2.25f32).to_bits());
+
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), (-5.75f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn adds_overlapping_registers() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+    cpu.cp1_mut().write_word(4, 2.25f32.to_bits());
+
+    // ADD.S $f2, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 2, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(2), 3.75f32.to_bits(),);
+
+    assert_eq!(cpu.cp1().read_word(4), 2.25f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_single_arithmetic_disabled() {
+    for funct in [0, 1] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+        cpu.cp1_mut().write_word(4, 2.25f32.to_bits());
+        cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.cp0().coprocessor_error(), 1);
+        assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF);
+    }
+}
+
+#[test]
+fn cp1_single_arithmetic_integration() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(64);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.write_reg(8, 1.5f32.to_bits());
+    cpu.write_reg(9, 2.25f32.to_bits());
+    cpu.write_reg(11, 48);
+
+    let program = [
+        // MTC1 $8, $f2
+        encode_r(0x11, 4, 8, 2, 0, 0),
+        // MTC1 $9, $f4
+        encode_r(0x11, 4, 9, 4, 0, 0),
+        // ADD.S $f6, $f2, $f4
+        encode_r(0x11, 0x10, 4, 2, 6, 0),
+        // MFC1 $10, $f6
+        encode_r(0x11, 0, 10, 6, 0, 0),
+        // SWC1 $f6, 0($11)
+        i(0x39, 11, 6, 0),
+        // LWC1 $f8, 0($11)
+        i(0x31, 11, 8, 0),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..6 {
+        cpu.step(&mut memory);
+    }
+
+    let expected = 3.75f32.to_bits();
+
+    assert_eq!(cpu.read_reg(10), expected);
+    assert_eq!(cpu.cp1().read_word(6), expected);
+    assert_eq!(cpu.cp1().read_word(8), expected);
+    assert_eq!(memory.read_word(48), expected);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_single_mul() {
+    use crate::fpu::compute_single;
+    use crate::isa::Operation;
+
+    let result = compute_single(&Operation::MulS, 1.5f32.to_bits(), 4.0f32.to_bits());
+
+    assert_eq!(result, 6.0f32.to_bits());
+}
+
+#[test]
+fn fpu_single_div() {
+    use crate::fpu::compute_single;
+    use crate::isa::Operation;
+
+    let result = compute_single(&Operation::DivS, 7.5f32.to_bits(), 2.5f32.to_bits());
+
+    assert_eq!(result, 3.0f32.to_bits());
+}
+
+#[test]
+fn muls_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 1.5f32.to_bits());
+    cpu.cp1_mut().write_word(4, 4.0f32.to_bits());
+
+    // MUL.S $f6, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 2));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), 6.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn divs_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 7.5f32.to_bits());
+    cpu.cp1_mut().write_word(4, 2.5f32.to_bits());
+
+    // DIV.S $f6, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 3));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), 3.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn muls_negative_operand() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, (-2.5f32).to_bits());
+    cpu.cp1_mut().write_word(4, 4.0f32.to_bits());
+
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 2));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), (-10.0f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn divs_overlapping_registers() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 12.0f32.to_bits());
+    cpu.cp1_mut().write_word(4, 4.0f32.to_bits());
+
+    // DIV.S $f4, $f2, $f4
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 4, 3));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), 3.0f32.to_bits(),);
+
+    assert_eq!(cpu.cp1().read_word(2), 12.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_mul_div_disabled() {
+    for funct in [2, 3] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp1_mut().write_word(2, 6.0f32.to_bits());
+        cpu.cp1_mut().write_word(4, 2.0f32.to_bits());
+        cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.cp0().coprocessor_error(), 1);
+        assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF);
+    }
+}
+
+#[test]
+fn cp1_single_arithmetic_chain() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(16);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 8.0f32.to_bits());
+    cpu.cp1_mut().write_word(4, 4.0f32.to_bits());
+    cpu.cp1_mut().write_word(6, 2.0f32.to_bits());
+
+    let program = [
+        // ADD.S $f8, $f2, $f4
+        encode_r(0x11, 0x10, 4, 2, 8, 0),
+        // MUL.S $f8, $f8, $f6
+        encode_r(0x11, 0x10, 6, 8, 8, 2),
+        // SUB.S $f8, $f8, $f4
+        encode_r(0x11, 0x10, 4, 8, 8, 1),
+        // DIV.S $f8, $f8, $f6
+        encode_r(0x11, 0x10, 6, 8, 8, 3),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..4 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.cp1().read_word(8), 10.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn fpu_single_abs() {
+    use crate::fpu::compute_single_unary;
+    use crate::isa::Operation;
+
+    assert_eq!(
+        compute_single_unary(&Operation::AbsS, (-2.5f32).to_bits(),),
+        2.5f32.to_bits(),
+    );
+}
+
+#[test]
+fn fpu_single_neg() {
+    use crate::fpu::compute_single_unary;
+    use crate::isa::Operation;
+
+    for value in [2.5f32, -2.5, 0.0, -0.0] {
+        assert_eq!(
+            compute_single_unary(&Operation::NegS, value.to_bits(),),
+            (-value).to_bits(),
+        );
+    }
+}
+
+#[test]
+fn fpu_single_mov_preserves_bits() {
+    use crate::fpu::compute_single_unary;
+    use crate::isa::Operation;
+
+    for value in [0x0000_0000, 0x8000_0000, 0x7FC0_1234, 0xFFFF_FFFF] {
+        assert_eq!(compute_single_unary(&Operation::MovS, value,), value,);
+    }
+}
+
+#[test]
+fn fpu_single_sqrt() {
+    use crate::fpu::compute_single_unary;
+    use crate::isa::Operation;
+
+    assert_eq!(
+        compute_single_unary(&Operation::SqrtS, 6.25f32.to_bits(),),
+        2.5f32.to_bits(),
+    );
+}
+
+#[test]
+fn abss_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, (-3.5f32).to_bits());
+
+    // ABS.S $f4, $f2
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 4, 5));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), 3.5f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn negs_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 3.5f32.to_bits());
+
+    // NEG.S $f4, $f2
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 4, 7));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), (-3.5f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn movs_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    let value = 0x7FC0_1234;
+
+    cpu.cp1_mut().write_word(2, value);
+
+    // MOV.S $f4, $f2
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 4, 6));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), value);
+    assert_eq!(cpu.cp1().read_word(2), value);
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn sqrts_execution() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, 144.0f32.to_bits());
+
+    // SQRT.S $f4, $f2
+    memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 4, 4));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(4), 12.0f32.to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_single_unary_disabled() {
+    for funct in [4, 5, 6, 7] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(4);
+
+        cpu.cp1_mut().write_word(2, 4.0f32.to_bits());
+
+        cpu.cp1_mut().write_word(4, 0xDEAD_BEEF);
+
+        memory.write_word(0, encode_r(0x11, 0x10, 0, 2, 4, funct));
+
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 11);
+        assert_eq!(cpu.cp0().coprocessor_error(), 1);
+        assert_eq!(cpu.cp1().read_word(4), 0xDEAD_BEEF);
+    }
+}
+
+#[test]
+fn cp1_single_unary_chain() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(16);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_word(2, (-81.0f32).to_bits());
+
+    let program = [
+        // ABS.S $f4, $f2
+        encode_r(0x11, 0x10, 0, 2, 4, 5),
+        // SQRT.S $f4, $f4
+        encode_r(0x11, 0x10, 0, 4, 4, 4),
+        // NEG.S $f4, $f4
+        encode_r(0x11, 0x10, 0, 4, 4, 7),
+        // MOV.S $f6, $f4
+        encode_r(0x11, 0x10, 0, 4, 6, 6),
+    ];
+
+    for (index, word) in program.into_iter().enumerate() {
+        memory.write_word((index * 4) as u32, word);
+    }
+
+    for _ in 0..4 {
+        cpu.step(&mut memory);
+    }
+
+    assert_eq!(cpu.cp1().read_word(6), (-9.0f32).to_bits(),);
+
+    assert_eq!(cpu.cp1().read_word(2), (-81.0f32).to_bits(),);
+
+    assert!(!cpu.cp0().exception_level());
+}

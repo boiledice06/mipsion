@@ -29,22 +29,22 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 122/291개(41.92%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 54개, 대기 169개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 193/193 통과했다.
+현재 실행 경로는 132/291개(45.36%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 64개, 대기 159개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 229/229 통과했다.
 
 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
 | 실행 상태 | 수 | 비율 |
 | --- | ---: | ---: |
 | 구현 | 68 | 23.37% |
-| 부분 | 54 | 18.56% |
-| 대기 | 169 | 58.08% |
-| 실행 경로 합계 | 122 | 41.92% |
+| 부분 | 64 | 21.99% |
+| 대기 | 159 | 54.64% |
+| 실행 경로 합계 | 132 | 45.36% |
 
 v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, timer/software interrupt, MMU, 32-entry TLB 및 TLB refill을 지원한다.
 
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
-v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, FPU 제어 레지스터, FR=0 doubleword register mapping 및 GPR/FPR/Memory 간 word 전송을 지원한다.
+v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0 레지스터 매핑, 32/64-bit 메모리 전송 및 단정밀도 기본 산술 명령어 8개를 지원한다. FCSR rounding mode와 FP 산술 예외 처리는 후속 구현 대상이다.
 
 ## 작업 순서
 
@@ -68,11 +68,11 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ABS.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x05` | `0xFFFF003F` | `0x46200005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
 | `ABS.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x05` | `0xFFFF003F` | `0x46C00005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
-| `ABS.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x05` | `0xFFFF003F` | `0x46000005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
+| `ABS.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x05` | `0xFFFF003F` | `0x46000005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
 | `ADD` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x20` | `0xFC0007FF` | `0x00000020` | `rd, rs, rt` | signed 32-bit 덧셈. ADDI는 sign-extended immediate 사용 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 45 |
 | `ADD.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x00` | `0xFFE0003F` | `0x46200000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
 | `ADD.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x00` | `0xFFE0003F` | `0x46C00000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
-| `ADD.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x00` | `0xFFE0003F` | `0x46000000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
+| `ADD.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x00` | `0xFFE0003F` | `0x46000000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
 | `ADDI` | CPU 필수 | 부분 | 기초 예외 경로 | `0x08` | — | `0xFC000000` | `0x20000000` | `rt, rs, immediate` | signed 32-bit 덧셈. ADDI는 sign-extended immediate 사용 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 47 |
 | `ADDIU` | CPU 필수 | 구현 | 회귀 통과 | `0x09` | — | `0xFC000000` | `0x24000000` | `rt, rs, immediate` | modulo 2³² 덧셈. ADDIU는 sign-extended immediate 사용 | — | 48 |
 | `ADDU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x21` | `0xFC0007FF` | `0x00000021` | `rd, rs, rt` | modulo 2³² 덧셈. ADDIU는 sign-extended immediate 사용 | — | 49 |
@@ -183,7 +183,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `DI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606000` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 해제 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 115 |
 | `DIV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1A` | `0xFC00FFFF` | `0x0000001A` | `rs, rt` | signed 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 116 |
 | `DIV.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x03` | `0xFFE0003F` | `0x46200003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
-| `DIV.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x03` | `0xFFE0003F` | `0x46000003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
+| `DIV.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x03` | `0xFFE0003F` | `0x46000003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
 | `DIVU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1B` | `0xFC00FFFF` | `0x0000001B` | `rs, rt` | unsigned 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 119 |
 | `EHB` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x00` | `0xFFFFFFFF` | `0x000000C0` | — | 앞선 명령어의 execution hazard 해소 | — | 120 |
 | `EI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606020` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 설정 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 121 |
@@ -203,7 +203,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `JR.HB` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x00` | `0x08` | `0xFC1FFC3F` | `0x00000408` | `rs` | JR 및 execution/instruction hazard 해소 | target fetch 주소 정렬 위반 시 Address Error | 136 |
 | `LB` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x20` | — | `0xFC000000` | `0x80000000` | `rt, offset(base)` | byte sign-extend load | TLB Refill, TLB Invalid, Address Error, Watch | 138 |
 | `LBU` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x24` | — | `0xFC000000` | `0x90000000` | `rt, offset(base)` | byte zero-extend load | TLB Refill, TLB Invalid, Address Error, Watch | 139 |
-| `LDC1` | FPU 기본 | 대기 | 대기 | `0x35` | — | `0xFC000000` | `0xD4000000` | `ft, offset(base)` | doubleword를 FPR에 기록 load | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, Address Error, Watch | 140 |
+| `LDC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x35` | — | `0xFC000000` | `0xD4000000` | `ft, offset(base)` | doubleword를 FPR에 기록 load | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, Address Error, Watch | 140 |
 | `LDC2` | CP2 | 대기 | 대기 | `0x36` | — | `0xFC000000` | `0xD8000000` | `rt, offset(base)` | doubleword를 CP2에 기록 load | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, Address Error, Watch | 141 |
 | `LDXC1` | FPU 64 | 대기 | 대기 | `0x13` | `0x01` | `0xFC00F83F` | `0x4C000001` | `fd, index(base)` | base + index의 doubleword를 FPR에 기록 load | TLB Refill, TLB Invalid, Address Error, Reserved Instruction, Coprocessor Unusable, Watch | 142 |
 | `LH` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x21` | — | `0xFC000000` | `0x84000000` | `rt, offset(base)` | halfword sign-extend load | TLB Refill, TLB Invalid, Bus Error, Address Error, Watch | 143 |
@@ -231,7 +231,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `MFLO` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x12` | `0xFFFF07FF` | `0x00000012` | `rd` | LO를 rd로 이동 | — | 165 |
 | `MOV.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x06` | `0xFFFF003F` | `0x46200006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
 | `MOV.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x06` | `0xFFFF003F` | `0x46C00006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
-| `MOV.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x06` | `0xFFFF003F` | `0x46000006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
+| `MOV.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x06` | `0xFFFF003F` | `0x46000006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
 | `MOVF` | FPU 기본 | 대기 | 대기 | `0x00` | `0x01` | `0xFC0307FF` | `0x00000001` | `rd, rs, cc` | FCC[cc]가 0이면 rs를 rd로 이동 | Reserved Instruction, Coprocessor Unusable | 167 |
 | `MOVF.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x11` | `0xFFE3003F` | `0x46200011` | `fd, fs, cc` | FCC[cc]가 0이면 fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 168 |
 | `MOVF.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x11` | `0xFFE3003F` | `0x46C00011` | `fd, fs, cc` | FCC[cc]가 0이면 fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 168 |
@@ -263,12 +263,12 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `MUL` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x02` | `0xFC0007FF` | `0x70000002` | `rd, rs, rt` | signed 곱의 하위 32비트를 rd에 기록 | HI/LO 결과 UNPREDICTABLE | 185 |
 | `MUL.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x02` | `0xFFE0003F` | `0x46200002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
 | `MUL.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x02` | `0xFFE0003F` | `0x46C00002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
-| `MUL.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x02` | `0xFFE0003F` | `0x46000002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
+| `MUL.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x02` | `0xFFE0003F` | `0x46000002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
 | `MULT` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x18` | `0xFC00FFFF` | `0x00000018` | `rs, rt` | signed 64-bit 곱을 HI:LO에 기록 | — | 187 |
 | `MULTU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x19` | `0xFC00FFFF` | `0x00000019` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에 기록 | — | 188 |
 | `NEG.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x07` | `0xFFFF003F` | `0x46200007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
 | `NEG.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x07` | `0xFFFF003F` | `0x46C00007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
-| `NEG.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x07` | `0xFFFF003F` | `0x46000007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
+| `NEG.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x07` | `0xFFFF003F` | `0x46000007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
 | `NMADD.D` | FPU 64 | 대기 | 대기 | `0x13` | `0x31` | `0xFC00003F` | `0x4C000031` | `fd, fr, fs, ft` | −(fs × ft + fr). 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 190 |
 | `NMADD.PS` | FPU 64 | 대기 | 대기 | `0x13` | `0x36` | `0xFC00003F` | `0x4C000036` | `fd, fr, fs, ft` | −(fs × ft + fr). 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 190 |
 | `NMADD.S` | FPU 64 | 대기 | 대기 | `0x13` | `0x30` | `0xFC00003F` | `0x4C000030` | `fd, fr, fs, ft` | −(fs × ft + fr). 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 190 |
@@ -301,7 +301,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `SB` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x28` | — | `0xFC000000` | `0xA0000000` | `rt, offset(base)` | 하위 byte store | TLB Refill, TLB Invalid, TLB Modified, Bus Error, Address Error, Watch | 216 |
 | `SC` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x38` | — | `0xFC000000` | `0xE0000000` | `rt, offset(base)` | reservation이 유효하면 word store. 성공 여부를 rt에 1 또는 0으로 기록 | TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch. 선행 LL 및 동일 주소 조건 위반은 UNPREDICTABLE | 217 |
 | `SDBBP` | EJTAG | 대기 | 대기 | `0x1C` | `0x3F` | `0xFC00003F` | `0x7000003F` | `code` | Debug Breakpoint 발생. Debug Mode에서는 Debug Mode Breakpoint | Debug Breakpoint Exception Debug Mode Breakpoint Exception | 219 |
-| `SDC1` | FPU 기본 | 대기 | 대기 | `0x3D` | — | `0xFC000000` | `0xF4000000` | `ft, offset(base)` | FPR의 doubleword store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 220 |
+| `SDC1` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x3D` | — | `0xFC000000` | `0xF4000000` | `ft, offset(base)` | FPR의 doubleword store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 220 |
 | `SDC2` | CP2 | 대기 | 대기 | `0x3E` | — | `0xFC000000` | `0xF8000000` | `rt, offset(base)` | CP2의 doubleword store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 221 |
 | `SDXC1` | FPU 64 | 대기 | 대기 | `0x13` | `0x09` | `0xFC0007FF` | `0x4C000009` | `fs, index(base)` | base + index에 FPR doubleword store | TLB Refill, TLB Invalid, TLB Modified, Coprocessor Unusable, Address Error, Reserved Instruction, Watch | 222 |
 | `SEB` | CPU 필수 | 구현 | 회귀 통과 | `0x1F` | `0x20` | `0xFFE007FF` | `0x7C000420` | `rd, rt` | rt의 하위 8비트를 sign-extend | Reserved Instruction | 223 |
@@ -314,7 +314,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `SLTIU` | CPU 필수 | 구현 | 회귀 통과 | `0x0B` | — | `0xFC000000` | `0x2C000000` | `rt, rs, immediate` | 작으면 1, 아니면 0. U는 unsigned 비교. immediate는 U 여부와 관계없이 sign-extend | — | 230 |
 | `SLTU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x2B` | `0xFC0007FF` | `0x0000002B` | `rd, rs, rt` | 작으면 1, 아니면 0. U는 unsigned 비교. immediate는 U 여부와 관계없이 sign-extend | — | 231 |
 | `SQRT.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x04` | `0xFFFF003F` | `0x46200004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
-| `SQRT.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x04` | `0xFFFF003F` | `0x46000004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
+| `SQRT.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x04` | `0xFFFF003F` | `0x46000004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
 | `SRA` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x03` | `0xFFE0003F` | `0x00000003` | `rd, rt, sa` | arithmetic right shift by sa | — | 233 |
 | `SRAV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x07` | `0xFC0007FF` | `0x00000007` | `rd, rt, rs` | arithmetic right shift by rs[4:0] | — | 234 |
 | `SRL` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x02` | `0xFFE0003F` | `0x00000002` | `rd, rt, sa` | logical right shift by sa | — | 235 |
@@ -323,7 +323,7 @@ v0.3.0 개발 중 (Batch 33-A): CP1 register file, CU1 접근 권한, Cause.CE, 
 | `SUB` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x22` | `0xFC0007FF` | `0x00000022` | `rd, rs, rt` | signed 32-bit 뺄셈 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 238 |
 | `SUB.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x01` | `0xFFE0003F` | `0x46200001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
 | `SUB.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x01` | `0xFFE0003F` | `0x46C00001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
-| `SUB.S` | FPU 기본 | 대기 | 대기 | `0x11` | `0x01` | `0xFFE0003F` | `0x46000001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
+| `SUB.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x01` | `0xFFE0003F` | `0x46000001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
 | `SUBU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x23` | `0xFC0007FF` | `0x00000023` | `rd, rs, rt` | modulo 2³² 뺄셈 | — | 240 |
 | `SUXC1` | FPU 64 | 대기 | 대기 | `0x13` | `0x0D` | `0xFC0007FF` | `0x4C00000D` | `fs, index(base)` | base + index를 8바이트 경계로 내림한 주소에 FPR doubleword store | Coprocessor Unusable, Reserved Instruction, TLB Refill, TLB Invalid, TLB Modified, Watch | 241 |
 | `SW` | CPU 필수 | 부분 | 회귀 통과 (제한 범위) | `0x2B` | — | `0xFC000000` | `0xAC000000` | `rt, offset(base)` | word store | TLB Refill, TLB Invalid, TLB Modified, Address Error, Watch | 242 |

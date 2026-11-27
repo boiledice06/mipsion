@@ -46,6 +46,21 @@ impl Memory {
         self.write_halfword(address + 2, high);
     }
 
+    pub fn read_doubleword(&self, address: u32) -> u64 {
+        let low = self.read_word(address);
+        let high = self.read_word(address + 4);
+
+        u64::from(low) | (u64::from(high) << 32)
+    }
+
+    pub fn write_doubleword(&mut self, address: u32, value: u64) {
+        let low = value as u32;
+        let high = (value >> 32) as u32;
+
+        self.write_word(address, low);
+        self.write_word(address + 4, high);
+    }
+
     pub fn read_word_left(&self, address: u32, value: u32) -> u32 {
         let base = address & !3;
         let offset = address & 3;

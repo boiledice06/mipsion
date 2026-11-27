@@ -35,6 +35,14 @@ impl RawInstruction {
         self.extract(16, 5) as u8
     }
 
+    pub fn fd(&self) -> u8 {
+        self.extract(6, 5) as u8
+    }
+
+    pub fn fmt(&self) -> u8 {
+        self.extract(21, 5) as u8
+    }
+
     pub fn shamt(&self) -> u8 {
         self.extract(6, 5) as u8
     }

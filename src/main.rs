@@ -4,6 +4,7 @@ mod alu;
 mod cpu;
 mod decoder;
 mod executor;
+mod fpu;
 mod instruction;
 mod isa;
 mod memory;

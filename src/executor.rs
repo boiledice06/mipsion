@@ -11,6 +11,8 @@ use crate::exception::Exception;
 
 use crate::mmu::AccessType;
 
+use crate::fpu::{compute_single, compute_single_unary};
+
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     // CP0 및 TLB 명령어 접근 권한 검사
     if matches!(
@@ -371,6 +373,68 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             }
         }
 
+        Operation::Ldc1 | Operation::Sdc1 => {
+            let base = inst.rs() as usize;
+            let ft = inst.ft() as usize;
+
+            let offset = inst.immediate() as i16 as i32 as u32;
+            let address = cpu.read_reg(base).wrapping_add(offset);
+
+            let is_load = matches!(operation, Operation::Ldc1);
+
+            // FR=0 doubleword register 검사
+            if !cpu.cp1().valid_double_register(ft) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            // Doubleword alignment 검사
+            if address & 7 != 0 {
+                let exception = if is_load {
+                    Exception::AddressErrorLoad
+                } else {
+                    Exception::AddressErrorStore
+                };
+
+                cpu.raise_exception(exception, Some(address));
+
+                return;
+            }
+
+            // 주소 변환
+            let access = if is_load {
+                AccessType::Load
+            } else {
+                AccessType::Store
+            };
+
+            let Some(physical_address) = cpu.translate_address(address, access) else {
+                return;
+            };
+
+            match operation {
+                Operation::Ldc1 => {
+                    let value = memory.read_doubleword(physical_address);
+
+                    cpu.cp1_mut().write_doubleword(ft, value);
+                }
+
+                Operation::Sdc1 => {
+                    let value = cpu
+                        .cp1()
+                        .read_doubleword(ft)
+                        .expect("validated doubleword register");
+
+                    memory.write_doubleword(physical_address, value);
+
+                    cpu.clear_reservation();
+                }
+
+                _ => unreachable!(),
+            }
+        }
+
         Operation::Lwl | Operation::Lwr => {
             let rs = inst.rs() as usize;
             let rt = inst.rt() as usize;
@@ -720,6 +784,30 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             if !cpu.cp1_mut().write_high_word(fs, value) {
                 cpu.raise_exception(Exception::ReservedInstruction, None);
             }
+        }
+
+        Operation::AddS | Operation::SubS | Operation::MulS | Operation::DivS => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+            let fd = inst.fd() as usize;
+
+            let lhs = cpu.cp1().read_word(fs);
+            let rhs = cpu.cp1().read_word(ft);
+
+            let result = compute_single(operation, lhs, rhs);
+
+            cpu.cp1_mut().write_word(fd, result);
+        }
+
+        Operation::AbsS | Operation::MovS | Operation::NegS | Operation::SqrtS => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            let operand = cpu.cp1().read_word(fs);
+
+            let result = compute_single_unary(operation, operand);
+
+            cpu.cp1_mut().write_word(fd, result);
         }
 
         Operation::Cfc1 => {
