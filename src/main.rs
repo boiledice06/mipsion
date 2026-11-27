@@ -7,6 +7,7 @@ mod executor;
 mod fpu;
 mod instruction;
 mod isa;
+mod loader;
 mod memory;
 mod mmu;
 mod tlb;

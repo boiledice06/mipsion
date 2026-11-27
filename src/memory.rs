@@ -116,4 +116,8 @@ impl Memory {
             self.write_byte(base + i, byte);
         }
     }
+
+    pub fn size(&self) -> usize {
+        self.data.len()
+    }
 }
