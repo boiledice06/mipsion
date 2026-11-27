@@ -113,3 +113,12 @@ The current core is exercised through regression tests. A standalone program loa
 - Interactive inspection of CPU and memory state
 - Visualization of instruction execution and pipeline behavior
 - Minimal dependencies in the emulation core
+
+## License
+
+MIPSion is dual-licensed under either of:
+
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
