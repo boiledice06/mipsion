@@ -19,6 +19,8 @@ mod cp0;
 mod cp1;
 mod exception;
 
+mod inspection;
+
 #[cfg(test)]
 mod regression;
 #[cfg(test)]
@@ -79,6 +81,12 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
     let mut memory = Memory::new(config.memory_size);
     let mut cpu = Cpu::new();
 
+    if let Some((address, size)) = config.dump_memory
+        && !memory.contains_range(address, size)
+    {
+        return Err("memory dump range is out of bounds".into());
+    }
+
     load_raw(&mut memory, config.load_address, &bytes)
         .map_err(|error| format!("failed to load program: {error:?}"))?;
 
@@ -105,6 +113,27 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
     println!("Steps:        {}", result.steps);
     println!("Final PC:     {:#010X}", result.final_pc);
     println!("Stop reason:  {:?}", result.reason);
+
+    if config.dump_registers {
+        println!();
+        print!("{}", inspection::dump_registers(&cpu));
+    }
+
+    if config.dump_cp0 {
+        println!();
+        print!("{}", inspection::dump_cp0(&cpu));
+    }
+
+    if config.dump_fpu {
+        println!();
+        print!("{}", inspection::dump_fpu(&cpu));
+    }
+
+    if let Some((address, size)) = config.dump_memory {
+        println!();
+
+        print!("{}", inspection::dump_memory(&memory, address, size)?);
+    }
 
     Ok(())
 }

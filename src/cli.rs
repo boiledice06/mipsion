@@ -8,6 +8,10 @@ pub struct CliConfig {
     pub memory_size: usize,
     pub max_steps: u64,
     pub stop_on_exception: bool,
+    pub dump_registers: bool,
+    pub dump_cp0: bool,
+    pub dump_fpu: bool,
+    pub dump_memory: Option<(u32, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +35,11 @@ Options:
     --continue-on-exception    Continue execution after exceptions
     -h, --help                 Show this help message
     -V, --version              Show version
+    --dump-registers           Display general-purpose registers
+    --dump-cp0                 Display system control registers
+    --dump-fpu                 Display floating-point registers
+    --dump-memory <addr> <size>
+                               Display physical memory contents
 
 Numbers may be decimal or hexadecimal (0x prefix).
 ";
@@ -66,6 +75,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     let mut memory_size = 16 * 1024 * 1024;
     let mut max_steps = 1_000_000;
     let mut stop_on_exception = true;
+    let mut dump_registers = false;
+    let mut dump_cp0 = false;
+    let mut dump_fpu = false;
+    let mut dump_memory = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -98,6 +111,37 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
 
             "--continue-on-exception" => {
                 stop_on_exception = false;
+            }
+
+            "--dump-registers" => {
+                dump_registers = true;
+            }
+
+            "--dump-cp0" => {
+                dump_cp0 = true;
+            }
+
+            "--dump-fpu" => {
+                dump_fpu = true;
+            }
+
+            "--dump-memory" => {
+                let address = parse_address(&next_value(&mut args, &arg)?)?;
+
+                let value = next_value(&mut args, &arg)?;
+
+                let size = usize::try_from(parse_number(&value)?)
+                    .map_err(|_| format!("dump size out of range: {value}"))?;
+
+                if size == 0 {
+                    return Err("dump size must be greater than zero".into());
+                }
+
+                if size > 65536 {
+                    return Err("memory dump exceeds 64 KiB limit".into());
+                }
+
+                dump_memory = Some((address, size));
             }
 
             _ if arg.starts_with('-') => {
@@ -137,5 +181,9 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         memory_size,
         max_steps,
         stop_on_exception,
+        dump_registers,
+        dump_cp0,
+        dump_fpu,
+        dump_memory,
     }))
 }
