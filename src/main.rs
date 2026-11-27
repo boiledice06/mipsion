@@ -10,6 +10,7 @@ mod isa;
 mod loader;
 mod memory;
 mod mmu;
+mod runtime;
 mod tlb;
 
 mod cp0;

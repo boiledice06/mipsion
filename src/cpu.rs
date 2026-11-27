@@ -24,6 +24,7 @@ pub struct Cpu {
     next_delay_slot: bool,
     reservation: Option<u32>,
     translation_mode: TranslationMode,
+    exception_count: u64,
 }
 
 impl Cpu {
@@ -42,6 +43,7 @@ impl Cpu {
             next_delay_slot: false,
             reservation: None,
             translation_mode: TranslationMode::Bare,
+            exception_count: 0,
         }
     }
 
@@ -185,6 +187,8 @@ impl Cpu {
     }
 
     pub fn raise_exception(&mut self, exception: Exception, bad_address: Option<u32>) {
+        self.exception_count = self.exception_count.wrapping_add(1);
+
         // Exception 진입 이전의 EXL로 Vector 결정
         let vector = self.cp0.exception_vector(exception);
 
@@ -270,5 +274,9 @@ impl Cpu {
         self.raise_exception(exception, None);
 
         false
+    }
+
+    pub fn exception_count(&self) -> u64 {
+        self.exception_count
     }
 }
