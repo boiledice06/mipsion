@@ -26,12 +26,12 @@ v0.3.0 (in development) — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
-| ISA entries with execution logic | 132 / 291 (45.36%) |
+| ISA entries with execution logic | 140 / 291 (48.11%) |
 | Mandatory CPU instruction execution paths | 105 / 105 |
 | Implemented (normal execution semantics) | 68 |
-| Partially implemented | 64 |
-| Pending | 159 |
-| Regression tests | 229 / 229 passing |
+| Partially implemented | 72 |
+| Pending | 151 |
+| Regression tests | 259 / 259 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -62,6 +62,7 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] FR=0 doubleword register mapping
 - [x] GPR/FPR and word/doubleword memory transfers
 - [x] Basic single-precision arithmetic
+- [x] Basic double-precision arithmetic
 - [ ] Floating-point unit
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -81,7 +82,7 @@ The functional emulation core is designed independently of the user interface.
 - `isa` — instruction definitions and operation types generated at build time
 - `decoder` — table-driven instruction identification
 - `alu` — arithmetic, logical, bit-field and HI/LO computations
-- `fpu` — single-precision floating-point computations
+- `fpu` — single- and double-precision floating-point computations
 - `executor` — instruction semantics and control flow
 - `cp0` — system registers, privilege, exceptions and interrupts
 - `cp1` — floating-point registers, control registers and data transfers
@@ -110,8 +111,8 @@ The current core is exercised through regression tests. A standalone program loa
 - Physical memory bounds and bus errors remain incomplete.
 - CP0, TLB and exception behavior cover a limited architecture profile.
 - Cache behavior, execution hazards and full synchronization semantics are incomplete.
-- FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers and basic single-precision arithmetic.
-- Double-precision arithmetic, conversions, comparisons, FCSR rounding and IEEE 754 exception semantics remain incomplete.
+- FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers and basic single- and double-precision arithmetic.
+- Format conversions, comparisons, conditional operations, FCSR rounding and IEEE 754 exception semantics remain incomplete.
 - CP1 feature advertisement and full exception conformance remain incomplete.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.

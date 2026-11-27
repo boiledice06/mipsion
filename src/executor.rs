@@ -11,7 +11,7 @@ use crate::exception::Exception;
 
 use crate::mmu::AccessType;
 
-use crate::fpu::{compute_single, compute_single_unary};
+use crate::fpu::{compute_double, compute_double_unary, compute_single, compute_single_unary};
 
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
     // CP0 및 TLB 명령어 접근 권한 검사
@@ -808,6 +808,57 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let result = compute_single_unary(operation, operand);
 
             cpu.cp1_mut().write_word(fd, result);
+        }
+
+        Operation::AddD | Operation::SubD | Operation::MulD | Operation::DivD => {
+            let fs = inst.fs() as usize;
+            let ft = inst.ft() as usize;
+            let fd = inst.fd() as usize;
+
+            // FR=0 doubleword register validation
+            if !cpu.cp1().valid_double_register(fs)
+                || !cpu.cp1().valid_double_register(ft)
+                || !cpu.cp1().valid_double_register(fd)
+            {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let lhs = cpu
+                .cp1()
+                .read_doubleword(fs)
+                .expect("validated source register");
+
+            let rhs = cpu
+                .cp1()
+                .read_doubleword(ft)
+                .expect("validated source register");
+
+            let result = compute_double(operation, lhs, rhs);
+
+            cpu.cp1_mut().write_doubleword(fd, result);
+        }
+
+        Operation::AbsD | Operation::MovD | Operation::NegD | Operation::SqrtD => {
+            let fs = inst.fs() as usize;
+            let fd = inst.fd() as usize;
+
+            // FR=0 doubleword register validation
+            if !cpu.cp1().valid_double_register(fs) || !cpu.cp1().valid_double_register(fd) {
+                cpu.raise_exception(Exception::ReservedInstruction, None);
+
+                return;
+            }
+
+            let operand = cpu
+                .cp1()
+                .read_doubleword(fs)
+                .expect("validated source register");
+
+            let result = compute_double_unary(operation, operand);
+
+            cpu.cp1_mut().write_doubleword(fd, result);
         }
 
         Operation::Cfc1 => {

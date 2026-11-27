@@ -29,22 +29,22 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 132/291개(45.36%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 64개, 대기 159개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 229/229 통과했다.
+현재 실행 경로는 140/291개(48.11%)이며 CPU 필수 105개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 72개, 대기 151개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 259/259 통과했다.
 
 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
 | 실행 상태 | 수 | 비율 |
 | --- | ---: | ---: |
 | 구현 | 68 | 23.37% |
-| 부분 | 64 | 21.99% |
-| 대기 | 159 | 54.64% |
-| 실행 경로 합계 | 132 | 45.36% |
+| 부분 | 72 | 24.74% |
+| 대기 | 151 | 51.89% |
+| 실행 경로 합계 | 140 | 48.11% |
 
 v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, timer/software interrupt, MMU, 32-entry TLB 및 TLB refill을 지원한다.
 
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
-v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0 레지스터 매핑, 32/64-bit 메모리 전송 및 단정밀도 기본 산술 명령어 8개를 지원한다. FCSR rounding mode와 FP 산술 예외 처리는 후속 구현 대상이다.
+v0.3.0 개발 중 (Batch 35-C): CP1 기반 구조, FPU 제어 레지스터, FR=0 레지스터 매핑, 32/64-bit 데이터 전송 및 단정밀도/배정밀도 기본 산술 명령어 16개를 지원한다. 형변환, 비교, FCSR rounding mode와 FP 산술 예외 처리는 후속 구현 대상이다.
 
 ## 작업 순서
 
@@ -66,11 +66,11 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 
 | Mnemonic | 분류 | 실행 | 테스트 | Opcode | Funct | Mask | Pattern | Operand format | 동작 | 예외 및 제한 | 쪽 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ABS.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x05` | `0xFFFF003F` | `0x46200005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
+| `ABS.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x05` | `0xFFFF003F` | `0x46200005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
 | `ABS.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x05` | `0xFFFF003F` | `0x46C00005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
 | `ABS.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x05` | `0xFFFF003F` | `0x46000005` | `fd, fs` | 절댓값 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 44 |
 | `ADD` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x20` | `0xFC0007FF` | `0x00000020` | `rd, rs, rt` | signed 32-bit 덧셈. ADDI는 sign-extended immediate 사용 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 45 |
-| `ADD.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x00` | `0xFFE0003F` | `0x46200000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
+| `ADD.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x00` | `0xFFE0003F` | `0x46200000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
 | `ADD.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x00` | `0xFFE0003F` | `0x46C00000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
 | `ADD.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x00` | `0xFFE0003F` | `0x46000000` | `fd, fs, ft` | fs + ft | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation, Inexact, Overflow, Underflow | 46 |
 | `ADDI` | CPU 필수 | 부분 | 기초 예외 경로 | `0x08` | — | `0xFC000000` | `0x20000000` | `rt, rs, immediate` | signed 32-bit 덧셈. ADDI는 sign-extended immediate 사용 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 47 |
@@ -182,7 +182,7 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `DERET` | EJTAG | 대기 | 대기 | `0x10` | `0x1F` | `0xFFFFFFFF` | `0x4200001F` | — | DEPC에서 실행을 재개하고 Debug Mode 종료 | Coprocessor Unusable Exception Reserved Instruction Exception. Debug Mode 외 실행 시 UNDEFINED | 114 |
 | `DI` | CP0 | 부분 | 회귀 통과 (제한 범위) | `0x10` | — | `0xFFE0FFFF` | `0x41606000` | `[rt]` | 이전 Status를 rt에 쓰고 Status.IE를 해제 | Coprocessor Unusable, Reserved Instruction (Release 1 implementations) | 115 |
 | `DIV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1A` | `0xFC00FFFF` | `0x0000001A` | `rs, rt` | signed 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 116 |
-| `DIV.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x03` | `0xFFE0003F` | `0x46200003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
+| `DIV.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x03` | `0xFFE0003F` | `0x46200003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
 | `DIV.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x03` | `0xFFE0003F` | `0x46000003` | `fd, fs, ft` | fs ÷ ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Invalid Operation, Unimplemented Operation, Division-by-zero, Overflow, Underflow | 118 |
 | `DIVU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x1B` | `0xFC00FFFF` | `0x0000001B` | `rs, rt` | unsigned 몫을 LO, 나머지를 HI에 기록 | 0으로 나누면 HI/LO 결과 UNPREDICTABLE | 119 |
 | `EHB` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x00` | `0xFFFFFFFF` | `0x000000C0` | — | 앞선 명령어의 execution hazard 해소 | — | 120 |
@@ -229,7 +229,7 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `MFHC2` | CP2 | 대기 | 대기 | `0x12` | — | `0xFFE00000` | `0x48600000` | `rt, rd[, sel]` (예시) | CP2 register 상위 word → rt | Coprocessor Unusable, Reserved Instruction. Impl의 register가 없거나 64-bit가 아니면 UNPREDICTABLE | 163 |
 | `MFHI` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x10` | `0xFFFF07FF` | `0x00000010` | `rd` | HI를 rd로 이동 | — | 164 |
 | `MFLO` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x12` | `0xFFFF07FF` | `0x00000012` | `rd` | LO를 rd로 이동 | — | 165 |
-| `MOV.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x06` | `0xFFFF003F` | `0x46200006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
+| `MOV.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x06` | `0xFFFF003F` | `0x46200006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
 | `MOV.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x06` | `0xFFFF003F` | `0x46C00006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
 | `MOV.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x06` | `0xFFFF003F` | `0x46000006` | `fd, fs` | fs를 fd로 복사 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation | 166 |
 | `MOVF` | FPU 기본 | 대기 | 대기 | `0x00` | `0x01` | `0xFC0307FF` | `0x00000001` | `rd, rs, cc` | FCC[cc]가 0이면 rs를 rd로 이동 | Reserved Instruction, Coprocessor Unusable | 167 |
@@ -261,12 +261,12 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `MTHI` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x11` | `0xFC1FFFFF` | `0x00000011` | `rs` | rs를 HI로 이동 | — | 183 |
 | `MTLO` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x13` | `0xFC1FFFFF` | `0x00000013` | `rs` | rs를 LO로 이동 | — | 184 |
 | `MUL` | CPU 필수 | 구현 | 회귀 통과 | `0x1C` | `0x02` | `0xFC0007FF` | `0x70000002` | `rd, rs, rt` | signed 곱의 하위 32비트를 rd에 기록 | HI/LO 결과 UNPREDICTABLE | 185 |
-| `MUL.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x02` | `0xFFE0003F` | `0x46200002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
+| `MUL.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x02` | `0xFFE0003F` | `0x46200002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
 | `MUL.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x02` | `0xFFE0003F` | `0x46C00002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
 | `MUL.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x02` | `0xFFE0003F` | `0x46000002` | `fd, fs, ft` | fs × ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 186 |
 | `MULT` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x18` | `0xFC00FFFF` | `0x00000018` | `rs, rt` | signed 64-bit 곱을 HI:LO에 기록 | — | 187 |
 | `MULTU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x19` | `0xFC00FFFF` | `0x00000019` | `rs, rt` | unsigned 64-bit 곱을 HI:LO에 기록 | — | 188 |
-| `NEG.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x07` | `0xFFFF003F` | `0x46200007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
+| `NEG.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x07` | `0xFFFF003F` | `0x46200007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
 | `NEG.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x07` | `0xFFFF003F` | `0x46C00007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
 | `NEG.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x07` | `0xFFFF003F` | `0x46000007` | `fd, fs` | 부호 반전 | Coprocessor Unusable, Reserved Instruction / FPU: Unimplemented Operation, Invalid Operation | 189 |
 | `NMADD.D` | FPU 64 | 대기 | 대기 | `0x13` | `0x31` | `0xFC00003F` | `0x4C000031` | `fd, fr, fs, ft` | −(fs × ft + fr). 곱셈과 덧셈 또는 뺄셈은 각각 반올림 | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Unimplemented Operation, Invalid Operation, Overflow, Underflow | 190 |
@@ -313,7 +313,7 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `SLTI` | CPU 필수 | 구현 | 회귀 통과 | `0x0A` | — | `0xFC000000` | `0x28000000` | `rt, rs, immediate` | 작으면 1, 아니면 0. U는 unsigned 비교. immediate는 U 여부와 관계없이 sign-extend | — | 229 |
 | `SLTIU` | CPU 필수 | 구현 | 회귀 통과 | `0x0B` | — | `0xFC000000` | `0x2C000000` | `rt, rs, immediate` | 작으면 1, 아니면 0. U는 unsigned 비교. immediate는 U 여부와 관계없이 sign-extend | — | 230 |
 | `SLTU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x2B` | `0xFC0007FF` | `0x0000002B` | `rd, rs, rt` | 작으면 1, 아니면 0. U는 unsigned 비교. immediate는 U 여부와 관계없이 sign-extend | — | 231 |
-| `SQRT.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x04` | `0xFFFF003F` | `0x46200004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
+| `SQRT.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x04` | `0xFFFF003F` | `0x46200004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
 | `SQRT.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x04` | `0xFFFF003F` | `0x46000004` | `fd, fs` | 제곱근 | Coprocessor Unusable, Reserved Instruction / FPU: Invalid Operation, Inexact, Unimplemented Operation | 232 |
 | `SRA` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x03` | `0xFFE0003F` | `0x00000003` | `rd, rt, sa` | arithmetic right shift by sa | — | 233 |
 | `SRAV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x07` | `0xFC0007FF` | `0x00000007` | `rd, rt, rs` | arithmetic right shift by rs[4:0] | — | 234 |
@@ -321,7 +321,7 @@ v0.3.0 개발 중 (Batch 34-C): CP1 기반 구조, FPU 제어 레지스터, FR=0
 | `SRLV` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x06` | `0xFC0007FF` | `0x00000006` | `rd, rt, rs` | logical right shift by rs[4:0] | — | 236 |
 | `SSNOP` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x00` | `0xFFFFFFFF` | `0x00000040` | — | superscalar issue 경계용 no-op | — | 237 |
 | `SUB` | CPU 필수 | 부분 | 기초 예외 경로 | `0x00` | `0x22` | `0xFC0007FF` | `0x00000022` | `rd, rs, rt` | signed 32-bit 뺄셈 | Integer Overflow (signed 결과 범위 초과 시, 목적 register 기록 생략) | 238 |
-| `SUB.D` | FPU 기본 | 대기 | 대기 | `0x11` | `0x01` | `0xFFE0003F` | `0x46200001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
+| `SUB.D` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x01` | `0xFFE0003F` | `0x46200001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
 | `SUB.PS` | FPU 64 | 대기 | 대기 | `0x11` | `0x01` | `0xFFE0003F` | `0x46C00001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
 | `SUB.S` | FPU 기본 | 부분 | 회귀 통과 (제한 범위) | `0x11` | `0x01` | `0xFFE0003F` | `0x46000001` | `fd, fs, ft` | fs − ft | Coprocessor Unusable, Reserved Instruction / FPU: Inexact, Overflow, Underflow, Invalid Operation, Unimplemented Operation | 239 |
 | `SUBU` | CPU 필수 | 구현 | 회귀 통과 | `0x00` | `0x23` | `0xFC0007FF` | `0x00000023` | `rd, rs, rt` | modulo 2³² 뺄셈 | — | 240 |
