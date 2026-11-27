@@ -44,7 +44,7 @@ v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, tim
 
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
-v0.3.0 개발 중 (Batch 42): FPU 기본 명령어 86개 전체의 실행 경로, 5종 산술 예외 기본 판별, 4가지 반올림 모드 및 S/D/W 형변환을 지원한다. Config1.FP 및 FIR의 S/D/W 기능 광고를 적용했다. FCSR.FS 기반의 기본 결과 flush 정책을 구현했다. Cause/Enable 2048개 조합, Sticky Flag, Unimplemented Operation 예외 요청, FP Trap의 delay slot 처리 및 destination 보존을 검증했다. 전체 명세 적합성 및 독립 참조 연산기 검증은 남아 있다.
+v0.3.0 (Batch 43): FPU 기본 명령어 86개 전체의 실행 경로, 5종 산술 예외 기본 판별, 4가지 반올림 모드 및 S/D/W 형변환을 지원한다. Config1.FP 및 FIR의 S/D/W 기능 광고를 적용했다. FCSR.FS 기반의 기본 결과 flush 정책을 구현했다. Cause/Enable 2048개 조합, Sticky Flag, Unimplemented Operation 예외 요청, FP Trap의 delay slot 처리 및 destination 보존을 검증했다. 전체 명세 적합성 및 독립 참조 연산기 검증은 남아 있다.
 
 ## 작업 순서
 

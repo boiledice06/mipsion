@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.3.0 (in development) — Floating-Point Unit
+v0.3.0 — Floating-Point Unit
 
 | Metric | Status |
 | --- | ---: |
