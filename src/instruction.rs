@@ -76,6 +76,7 @@ impl RawInstruction {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 pub enum Instruction {
     RType {
         opcode: u8,

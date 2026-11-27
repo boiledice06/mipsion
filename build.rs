@@ -4,7 +4,8 @@ fn main() {
     println!("cargo:rerun-if-changed=ISA_CHECKLIST.md");
 
     let checklist = fs::read_to_string("ISA_CHECKLIST.md").unwrap();
-    let mut operations = String::from("pub enum Operation {\n");
+    let mut operations =
+        String::from("#[allow(clippy::upper_case_acronyms)]\npub enum Operation {\n");
     let mut instructions = String::from("pub static INSTRUCTIONS: &[InstructionDef] = &[\n");
     let mut mnemonics = HashSet::new();
     let mut encodings = Vec::<(u32, u32, &str)>::new();
