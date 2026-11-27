@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.3.0 — Floating-Point Unit
+v0.4.0 — Program Loader and CLI
 
 | Metric | Status |
 | --- | ---: |
@@ -32,7 +32,7 @@ v0.3.0 — Floating-Point Unit
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Regression tests | 386 / 386 passing |
+| Regression tests | 491 / 491 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -90,7 +90,17 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] FP exception delivery in branch delay slots
 - [x] Sticky Flag and architectural state preservation
 - [ ] Full floating-point conformance
-- [ ] Program loader and assembler
+- [x] Validated raw binary loader
+- [x] Physical memory bounds and bus exceptions
+- [x] Bounded program execution runtime
+- [x] Standalone command-line interface
+- [x] GPR, CP0 and FPU register inspection
+- [x] Physical memory inspection
+- [x] Structured instruction tracing
+- [x] ELF32 little-endian MIPS executable loading
+- [x] PT_LOAD segment loading and BSS initialization
+- [x] ELF entry point and stack pointer initialization
+- [ ] Assembler
 - [ ] Interactive debugger
 - [ ] Five-stage pipeline simulation
 - [ ] Cache and hazard simulation
@@ -116,6 +126,12 @@ The functional emulation core is designed independently of the user interface.
 - `tlb` — software-managed translation lookaside buffer
 - `exception` — architectural exception codes
 - `test_helpers` / `regression` — instruction encoding and regression tests
+- `loader` — validated raw binary loading
+- `elf` — ELF32 executable parsing and segment loading
+- `runtime` — bounded execution and exception reporting
+- `cli` — command-line configuration
+- `inspection` — register and physical memory dumps
+- `trace` — structured instruction execution events
 - `build.rs` — ISA table generation from the checklist
 
 ## Getting Started
@@ -127,14 +143,34 @@ cargo build
 cargo test -q
 ```
 
-The current core is exercised through regression tests. A standalone program loader and interactive runtime are not yet available.
+Run the included examples:
+
+    cargo run -- examples/hello.bin
+    cargo run -- examples/hello.elf
+
+Inspect execution and CPU state:
+
+    cargo run -- examples/hello.elf --trace --dump-registers
+    cargo run -- examples/hello.bin --dump-memory 0 12
+    cargo run -- examples/hello.bin --dump-cp0 --dump-fpu
+
+For all available options:
+
+    cargo run -- --help
+
+The emulator has no external Rust dependencies.
 
 ## Current Limitations
 
 - Functional instruction emulation, not cycle-accurate simulation.
 - Bare translation mode remains the default for compatibility.
 - TLB-backed translation is available through the TLB execution mode.
-- Physical memory bounds and bus errors remain incomplete.
+- CPU fetch and data accesses include physical memory bounds checks and bus exceptions.
+- ELF loading supports a restricted ELF32 little-endian static MIPS executable profile.
+- ELF loading uses low, identity-mapped addresses.
+- Full ELF ABI validation, segment permissions and dynamic linking are unsupported.
+- Linux system calls and process initialization are not implemented.
+- Instruction tracing currently includes fetched instructions, GPR changes, HI/LO changes and exceptions.
 - CP0, TLB and exception behavior cover a limited architecture profile.
 - Cache behavior, execution hazards and full synchronization semantics are incomplete.
 - FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers, basic single- and double-precision arithmetic, and S/D/W format conversions.
@@ -151,7 +187,7 @@ The current core is exercised through regression tests. A standalone program loa
 - FR=1, optional formats and full exception conformance remain incomplete.
 - Unimplemented Operation request handling is supported, but complete architectural trigger conditions remain pending.
 - Optional coprocessors other than CP1 are not implemented.
-- Standalone program loading and graphical interfaces are not yet available.
+- Interactive debugging, assembly and graphical interfaces are not yet available.
 
 ## Goals
 

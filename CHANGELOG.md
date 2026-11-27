@@ -2,6 +2,46 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.4.0] - Program Loader and CLI
+
+### Added
+
+- Validated little-endian raw binary loading.
+- Physical memory range validation.
+- Instruction and data bus exceptions.
+- Bounded execution runtime with configurable step limits.
+- Exception-aware execution termination.
+- Standalone command-line interface.
+- Configurable load address, entry point and memory size.
+- GPR, HI/LO, CP0 and FPU register inspection.
+- Physical memory hexadecimal and ASCII dumps.
+- Structured instruction trace events.
+- Register change and exception tracing.
+- Callback-based trace delivery.
+- ELF32 little-endian MIPS executable parsing.
+- PT_LOAD segment loading and BSS zero initialization.
+- ELF entry point and stack pointer initialization.
+- Automatic raw binary and ELF format detection.
+- Raw binary and ELF execution examples.
+
+### Validation
+
+- 491 regression tests (+105 since v0.3.0).
+- Raw binary and ELF runtime integration tests.
+- Trace execution equivalence regression test.
+- Memory bounds and exception regression tests.
+- Zero external Rust dependencies.
+- 200 of 291 ISA entries with execution paths (68.73%).
+
+### Known limitations
+
+- Full MIPS32 Release 2 conformance remains incomplete.
+- ELF support is restricted to low, identity-mapped static executables.
+- Full MIPS ABI validation and segment permission enforcement are pending.
+- Dynamic linking and Linux system calls are unsupported.
+- Trace events do not yet include memory accesses or FPU changes.
+- Interactive debugging, assembly and cycle-accurate simulation are pending.
+
 ## [0.3.0] - Floating-Point Unit
 
 ### Added
