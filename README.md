@@ -32,7 +32,7 @@ v0.3.0 (in development) — Floating-Point Unit
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Regression tests | 367 / 367 passing |
+| Regression tests | 386 / 386 passing |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
 
@@ -83,6 +83,12 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Directed rounding for narrowing format conversions
 - [x] Legacy NaN and exception handling for format conversions
 - [x] Exact dyadic comparison using fixed-size integer accumulators
+- [x] CP0 Config1.FP and CP1 FIR feature advertisement
+- [x] Basic FCSR.FS result flushing for S/D arithmetic
+- [x] FCSR Cause/Enable exhaustive mask testing
+- [x] Unimplemented Operation exception request handling
+- [x] FP exception delivery in branch delay slots
+- [x] Sticky Flag and architectural state preservation
 - [ ] Full floating-point conformance
 - [ ] Program loader and assembler
 - [ ] Interactive debugger
@@ -138,9 +144,12 @@ The current core is exercised through regression tests. A standalone program loa
 - Basic detection of all five IEEE 754 arithmetic exceptions is available for single- and double-precision arithmetic.
 - Arithmetic supports all four rounding modes through native nearest-even results and exact-result comparisons.
 - Narrowing format conversions support directed rounding and basic range exception detection.
-- FS behavior, tininess boundary cases, exception priority and full IEEE 754 conformance remain incomplete.
+- Basic FCSR.FS result flushing is implemented.
+- Full FS semantics, tininess boundary cases, exception priority and IEEE 754 conformance remain incomplete.
 - Independent reference-FPU differential testing remains pending.
-- CP1 feature advertisement and full exception conformance remain incomplete.
+- Config1.FP and FIR advertise the implemented S/D/W profile.
+- FR=1, optional formats and full exception conformance remain incomplete.
+- Unimplemented Operation request handling is supported, but complete architectural trigger conditions remain pending.
 - Optional coprocessors other than CP1 are not implemented.
 - Standalone program loading and graphical interfaces are not yet available.
 

@@ -3026,7 +3026,7 @@ fn config_initialization() {
     let cp0 = Cp0::new();
 
     assert_eq!(cp0.read_config(), 0x8000_0482);
-    assert_eq!(cp0.read_config1(), 0x3E00_0000);
+    assert_eq!(cp0.read_config1(), 0x3E00_0001);
 }
 
 #[test]
@@ -3059,7 +3059,7 @@ fn config_tlb_size() {
     assert_eq!(config1 >> 31, 0);
 
     // FPU 미지원
-    assert_eq!(config1 & 1, 0);
+    assert_eq!(config1 & 1, 1);
 }
 
 #[test]
@@ -3110,9 +3110,9 @@ fn config_register_transfer() {
     );
 
     assert_eq!(cpu.read_reg(8), 0x8000_0482);
-    assert_eq!(cpu.read_reg(9), 0x3E00_0000);
+    assert_eq!(cpu.read_reg(9), 0x3E00_0001);
     assert_eq!(cpu.read_reg(11), 0x8000_0483);
-    assert_eq!(cpu.read_reg(12), 0x3E00_0000);
+    assert_eq!(cpu.read_reg(12), 0x3E00_0001);
 
     assert!(!cpu.cp0().exception_level());
 }
@@ -3162,7 +3162,7 @@ fn cp1_register_independence() {
 fn cp1_control_register_reset() {
     let cp1 = crate::cp1::Cp1::new();
 
-    assert_eq!(cp1.read_fir(), 0);
+    assert_eq!(cp1.read_fir(), 0x0013_0000);
     assert_eq!(cp1.read_fcsr(), 0);
 }
 
@@ -3383,7 +3383,9 @@ fn mtc1_disabled_preserves_fpr() {
 fn cp1_control_register_read() {
     let cpu = Cpu::new();
 
-    for index in [0, 25, 26, 28, 31] {
+    assert_eq!(cpu.cp1().read_control(0), Some(0x0013_0000));
+
+    for index in [25, 26, 28, 31] {
         assert_eq!(cpu.cp1().read_control(index), Some(0),);
     }
 
@@ -8214,4 +8216,583 @@ fn cp1_conversion_exception_traps() {
 
         assert_eq!(cpu.cp1().read_fcsr(), (enable << 7) | (exceptions << 12),);
     }
+}
+
+#[test]
+fn cp1_fir_feature_advertisement() {
+    let cpu = Cpu::new();
+
+    let fir = cpu.cp1().read_fir();
+
+    // Supported formats: S, D, W.
+    for bit in [16, 17, 20] {
+        assert_ne!(fir & (1 << bit), 0);
+    }
+
+    // Unsupported formats: PS, 3D, L, F64.
+    for bit in [18, 19, 21, 22] {
+        assert_eq!(fir & (1 << bit), 0);
+    }
+
+    assert_eq!(fir, 0x0013_0000);
+}
+
+#[test]
+fn cp0_cp1_feature_consistency() {
+    let cpu = Cpu::new();
+
+    let config1 = cpu.cp0().read_config1();
+    let fir = cpu.cp1().read_fir();
+
+    // Config1.FP advertises CP1 presence.
+    assert_eq!(config1 & 1, 1);
+
+    // Basic S/D/W formats are available.
+    assert_eq!(fir & 0x0013_0000, 0x0013_0000,);
+
+    // FR=1 register model is not available.
+    assert_eq!(fir & (1 << 22), 0);
+
+    // FPU presence does not imply access permission.
+    assert!(!cpu.cp0().cp1_accessible());
+}
+
+#[test]
+fn cp0_config1_fpu_discovery_instruction() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    // MFC0 $8, $16, 1
+    memory.write_word(0, encode_r(0x10, 0, 8, 16, 0, 1));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 0x3E00_0001,);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_fir_discovery_instruction() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    // CFC1 $8, $0
+    memory.write_word(0, encode_r(0x11, 2, 8, 0, 0, 0));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 0x0013_0000,);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_discovery_requires_cu1() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    // CP1 exists, but Status.CU1 is disabled.
+    assert_eq!(cpu.cp0().read_config1() & 1, 1,);
+
+    assert!(!cpu.cp0().cp1_accessible());
+
+    cpu.write_reg(8, 0xDEAD_BEEF);
+
+    // CFC1 $8, $0
+    memory.write_word(0, encode_r(0x11, 2, 8, 0, 0, 0));
+
+    cpu.step(&mut memory);
+
+    // Coprocessor Unusable.
+    assert_eq!(cpu.cp0().exception_code(), 11);
+
+    // Destination must not be modified.
+    assert_eq!(cpu.read_reg(8), 0xDEAD_BEEF,);
+
+    // The exception does not remove the FPU.
+    assert_eq!(cpu.cp0().read_config1() & 1, 1,);
+
+    assert_eq!(cpu.cp1().read_fir(), 0x0013_0000,);
+}
+
+#[test]
+fn cp1_flush_subnormal_control() {
+    let mut cpu = Cpu::new();
+
+    assert!(!cpu.cp1().flush_subnormals());
+
+    cpu.cp1_mut().write_control(31, 1 << 24);
+
+    assert!(cpu.cp1().flush_subnormals());
+
+    cpu.cp1_mut().write_control(28, 0);
+
+    assert!(!cpu.cp1().flush_subnormals());
+
+    cpu.cp1_mut().write_control(28, 1 << 2);
+
+    assert!(cpu.cp1().flush_subnormals());
+}
+#[test]
+fn fpu_single_flush_subnormal() {
+    use crate::fpu::*;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0, 0x8000_0000),
+        (RoundingMode::TowardZero, 0, 0x8000_0000),
+        (RoundingMode::TowardPositive, 0x0080_0000, 0x8000_0000),
+        (RoundingMode::TowardNegative, 0, 0x8080_0000),
+    ] {
+        for (operand, expected) in [(0x0040_0000u32, positive), (0x8040_0000, negative)] {
+            let original = FpResult {
+                value: operand,
+                exceptions: 0,
+            };
+
+            assert_eq!(flush_single_result(original, mode, false), original,);
+
+            let flushed = flush_single_result(original, mode, true);
+
+            assert_eq!(flushed.value, expected);
+
+            assert_eq!(flushed.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+        }
+    }
+}
+
+#[test]
+fn fpu_double_flush_subnormal() {
+    use crate::fpu::*;
+
+    for (mode, positive, negative) in [
+        (RoundingMode::NearestEven, 0, 0x8000_0000_0000_0000),
+        (RoundingMode::TowardZero, 0, 0x8000_0000_0000_0000),
+        (
+            RoundingMode::TowardPositive,
+            0x0010_0000_0000_0000,
+            0x8000_0000_0000_0000,
+        ),
+        (RoundingMode::TowardNegative, 0, 0x8010_0000_0000_0000),
+    ] {
+        for (operand, expected) in [
+            (0x0008_0000_0000_0000u64, positive),
+            (0x8008_0000_0000_0000, negative),
+        ] {
+            let original = FpResult {
+                value: operand,
+                exceptions: 0,
+            };
+
+            assert_eq!(flush_double_result(original, mode, false), original,);
+
+            let flushed = flush_double_result(original, mode, true);
+
+            assert_eq!(flushed.value, expected);
+
+            assert_eq!(flushed.exceptions, FP_UNDERFLOW | FP_INEXACT,);
+        }
+    }
+}
+
+#[test]
+fn fpu_flush_preserves_non_tiny_values() {
+    use crate::fpu::*;
+
+    for bits in [
+        0u32,
+        0x8000_0000,
+        0x0080_0000,
+        0x3F80_0000,
+        0x7F80_0000,
+        LEGACY_QNAN_SINGLE,
+    ] {
+        let original = FpResult {
+            value: bits,
+            exceptions: 0,
+        };
+
+        for mode in [
+            RoundingMode::NearestEven,
+            RoundingMode::TowardZero,
+            RoundingMode::TowardPositive,
+            RoundingMode::TowardNegative,
+        ] {
+            assert_eq!(flush_single_result(original, mode, true), original,);
+        }
+    }
+
+    for bits in [
+        0u64,
+        0x8000_0000_0000_0000,
+        0x0010_0000_0000_0000,
+        0x3FF0_0000_0000_0000,
+        0x7FF0_0000_0000_0000,
+        LEGACY_QNAN_DOUBLE,
+    ] {
+        let original = FpResult {
+            value: bits,
+            exceptions: 0,
+        };
+
+        for mode in [
+            RoundingMode::NearestEven,
+            RoundingMode::TowardZero,
+            RoundingMode::TowardPositive,
+            RoundingMode::TowardNegative,
+        ] {
+            assert_eq!(flush_double_result(original, mode, true), original,);
+        }
+    }
+}
+
+#[test]
+fn cp1_flush_arithmetic_integration() {
+    use crate::fpu::*;
+
+    for fmt in [0x10u32, 0x11] {
+        for fs in [false, true] {
+            for enable in [0, FP_UNDERFLOW] {
+                let mut cpu = Cpu::new();
+                let mut memory = Memory::new(4);
+
+                cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+                let control = (enable << 7) | if fs { 1 << 24 } else { 0 };
+
+                cpu.cp1_mut().write_control(31, control);
+
+                if fmt == 0x10 {
+                    cpu.cp1_mut().write_word(2, f32::MIN_POSITIVE.to_bits());
+
+                    cpu.cp1_mut().write_word(4, 0.5f32.to_bits());
+                } else {
+                    cpu.cp1_mut()
+                        .write_doubleword(2, f64::MIN_POSITIVE.to_bits());
+
+                    cpu.cp1_mut().write_doubleword(4, 0.5f64.to_bits());
+                }
+
+                let sentinel = 0x1234_5678_DEAD_BEEFu64;
+
+                cpu.cp1_mut().write_doubleword(6, sentinel);
+
+                // MUL.S / MUL.D
+                memory.write_word(0, encode_r(0x11, fmt, 4, 2, 6, 2));
+
+                cpu.step(&mut memory);
+
+                if fs && enable != 0 {
+                    assert_eq!(cpu.cp0().exception_code(), 15,);
+
+                    assert_eq!(cpu.cp1().read_doubleword(6), Some(sentinel),);
+
+                    continue;
+                }
+
+                if fmt == 0x10 {
+                    assert_eq!(cpu.cp1().read_word(6), if fs { 0 } else { 0x0040_0000 },);
+                } else {
+                    assert_eq!(
+                        cpu.cp1().read_doubleword(6),
+                        Some(if fs { 0 } else { 0x0008_0000_0000_0000 }),
+                    );
+                }
+
+                let exceptions = if fs { FP_UNDERFLOW | FP_INEXACT } else { 0 };
+
+                assert_eq!(
+                    cpu.cp1().read_fcsr(),
+                    control | (exceptions << 12) | (exceptions << 2),
+                );
+
+                assert!(!cpu.cp0().exception_level());
+            }
+        }
+    }
+}
+
+#[test]
+fn cp1_flush_conversion_and_move() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(8);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    // FS = 1, nearest-even.
+    cpu.cp1_mut().write_control(31, 1 << 24);
+
+    cpu.cp1_mut()
+        .write_doubleword(2, 2.0f64.powi(-149).to_bits());
+
+    cpu.cp1_mut().write_word(4, 1);
+
+    // CVT.S.D $f6, $f2
+    memory.write_word(0, encode_r(0x11, 0x11, 0, 2, 6, 0x20));
+
+    // MOV.S $f8, $f4
+    memory.write_word(4, encode_r(0x11, 0x10, 0, 4, 8, 6));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp1().read_word(6), 0);
+
+    let fcsr = (1 << 24) | (0b11 << 12) | (0b11 << 2);
+
+    assert_eq!(cpu.cp1().read_fcsr(), fcsr);
+
+    cpu.step(&mut memory);
+
+    // MOV must preserve subnormal bits.
+    assert_eq!(cpu.cp1().read_word(8), 1);
+
+    assert_eq!(cpu.cp1().read_fcsr(), fcsr);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_exception_mask_exhaustive() {
+    use crate::fpu::FP_UNIMPLEMENTED;
+
+    for cause in 0..64u32 {
+        for enable in 0..32u32 {
+            let mut cp1 = crate::cp1::Cp1::new();
+
+            let initial = (enable << 7) | 3 | (1 << 24);
+
+            cp1.write_control(31, initial);
+
+            let expected_trap = (cause & FP_UNIMPLEMENTED != 0) || (cause & enable != 0);
+
+            let trap = cp1.apply_fp_exceptions(cause);
+
+            assert_eq!(trap, expected_trap);
+            assert_eq!(cp1.exception_requested(), expected_trap,);
+
+            let flags = if expected_trap {
+                0
+            } else {
+                (cause & 0x1F) << 2
+            };
+
+            assert_eq!(cp1.read_fcsr(), initial | (cause << 12) | flags,);
+        }
+    }
+}
+
+#[test]
+fn cp1_exception_sticky_flags() {
+    use crate::fpu::*;
+
+    let mut cp1 = crate::cp1::Cp1::new();
+
+    let mut accumulated = 0;
+
+    for exception in [
+        FP_INEXACT,
+        FP_UNDERFLOW,
+        FP_OVERFLOW,
+        FP_DIVIDE_BY_ZERO,
+        FP_INVALID,
+    ] {
+        assert!(!cp1.apply_fp_exceptions(exception));
+
+        accumulated |= exception;
+
+        assert_eq!(cp1.read_fcsr(), (exception << 12) | (accumulated << 2),);
+    }
+
+    assert!(!cp1.apply_fp_exceptions(0));
+
+    // Cause cleared, all sticky Flags preserved.
+    assert_eq!(cp1.read_fcsr(), 0x7C);
+}
+
+#[test]
+fn cp1_exception_trap_preserves_sticky_flags() {
+    use crate::fpu::*;
+
+    let mut cp1 = crate::cp1::Cp1::new();
+
+    let initial = (FP_INVALID << 7) | (FP_DIVIDE_BY_ZERO << 2) | 3 | (1 << 24) | (1 << 23);
+
+    cp1.write_control(31, initial);
+
+    assert!(cp1.apply_fp_exceptions(FP_INVALID));
+
+    assert_eq!(cp1.read_fcsr(), initial | (FP_INVALID << 12),);
+
+    assert!(cp1.read_fcc(0));
+    assert_eq!(cp1.rounding_mode(), 3);
+    assert!(cp1.flush_subnormals());
+}
+
+#[test]
+fn cp1_unimplemented_exception_always_traps() {
+    use crate::fpu::*;
+
+    for enable in 0..32u32 {
+        let mut cp1 = crate::cp1::Cp1::new();
+
+        let initial = (enable << 7) | (FP_INEXACT << 2);
+
+        cp1.write_control(31, initial);
+
+        assert!(cp1.apply_fp_exceptions(FP_UNIMPLEMENTED));
+
+        assert_eq!(cp1.read_fcsr(), initial | (FP_UNIMPLEMENTED << 12),);
+
+        assert!(cp1.exception_requested());
+    }
+}
+
+#[test]
+fn cp1_sticky_flags_do_not_request_exception() {
+    let mut cp1 = crate::cp1::Cp1::new();
+
+    // All standard Flags and Enables set,
+    // but no current Cause.
+    cp1.write_control(31, (0x1F << 2) | (0x1F << 7));
+
+    assert!(!cp1.exception_requested());
+
+    assert!(!cp1.apply_fp_exceptions(0));
+
+    assert_eq!(cp1.read_fcsr(), (0x1F << 2) | (0x1F << 7),);
+}
+
+#[test]
+fn cp1_arithmetic_trap_in_delay_slot() {
+    for (likely, condition) in [(false, true), (false, false), (true, true)] {
+        let mut cpu = Cpu::new();
+        let mut memory = Memory::new(16);
+
+        cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+        // Enable Divide by Zero.
+        cpu.cp1_mut().write_control(31, 1 << 10);
+
+        cpu.cp1_mut().write_fcc(0, condition);
+
+        cpu.cp1_mut().write_word(2, 1.0f32.to_bits());
+
+        cpu.cp1_mut().write_word(4, 0);
+        cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+        // BC1T / BC1TL
+        memory.write_word(0, encode_fp_branch(0, likely, true, 2));
+
+        // DIV.S in delay slot.
+        memory.write_word(4, encode_r(0x11, 0x10, 4, 2, 6, 3));
+
+        cpu.step(&mut memory);
+        cpu.step(&mut memory);
+
+        assert_eq!(cpu.cp0().exception_code(), 15);
+        assert_eq!(cpu.cp0().read_epc(), 0);
+
+        // CP0.Cause.BD
+        let cause = cpu.cp0().read_reg(13, 0).unwrap();
+
+        assert_ne!(cause & (1 << 31), 0);
+
+        assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF,);
+
+        assert_ne!(cpu.cp1().read_fcsr() & (1 << 15), 0,);
+
+        assert!(cpu.cp0().exception_level());
+    }
+}
+
+#[test]
+fn cp1_branch_likely_annuls_arithmetic_trap() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(16);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    cpu.cp1_mut().write_control(31, 1 << 10);
+
+    cpu.cp1_mut().write_fcc(0, false);
+
+    cpu.cp1_mut().write_word(2, 1.0f32.to_bits());
+
+    cpu.cp1_mut().write_word(4, 0);
+    cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+
+    let initial_fcsr = cpu.cp1().read_fcsr();
+
+    // BC1TL: not taken.
+    memory.write_word(0, encode_fp_branch(0, true, true, 2));
+
+    // Must be annulled.
+    memory.write_word(4, encode_r(0x11, 0x10, 4, 2, 6, 3));
+
+    // ADDIU $8, $0, 42
+    memory.write_word(8, i(9, 0, 8, 42));
+
+    cpu.step(&mut memory);
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.read_reg(8), 42);
+
+    assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF,);
+
+    assert_eq!(cpu.cp1().read_fcsr(), initial_fcsr,);
+
+    assert!(!cpu.cp0().exception_level());
+}
+
+#[test]
+fn cp1_trap_preserves_unrelated_state() {
+    let mut cpu = Cpu::new();
+    let mut memory = Memory::new(4);
+
+    cpu.cp0_mut().write_reg(12, 0, 1 << 29);
+
+    let initial_fcsr = (1 << 11) // Invalid Enable
+        | (1 << 5) // Divide-by-zero Flag
+        | (1 << 24) // FS
+        | 2; // Round toward positive
+
+    cpu.cp1_mut().write_control(31, initial_fcsr);
+
+    // Set all FCC bits.
+    for cc in 0..8 {
+        cpu.cp1_mut().write_fcc(cc, true);
+    }
+
+    cpu.write_reg(8, 0x1234_5678);
+
+    cpu.cp1_mut().write_word(2, 0);
+    cpu.cp1_mut().write_word(4, 0);
+    cpu.cp1_mut().write_word(6, 0xDEAD_BEEF);
+    cpu.cp1_mut().write_word(7, 0x1234_ABCD);
+
+    let before = cpu.cp1().read_fcsr();
+
+    // DIV.S: 0 / 0 -> Invalid Operation.
+    memory.write_word(0, encode_r(0x11, 0x10, 4, 2, 6, 3));
+
+    cpu.step(&mut memory);
+
+    assert_eq!(cpu.cp0().exception_code(), 15);
+
+    assert_eq!(cpu.read_reg(8), 0x1234_5678);
+
+    assert_eq!(cpu.cp1().read_word(2), 0);
+    assert_eq!(cpu.cp1().read_word(4), 0);
+
+    assert_eq!(cpu.cp1().read_word(6), 0xDEAD_BEEF,);
+
+    assert_eq!(cpu.cp1().read_word(7), 0x1234_ABCD,);
+
+    for cc in 0..8 {
+        assert!(cpu.cp1().read_fcc(cc));
+    }
+
+    assert_eq!(cpu.cp1().read_fcsr(), before | (1 << 16),);
 }

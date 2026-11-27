@@ -1327,3 +1327,73 @@ pub fn checked_word_to_double(operand: u32) -> FpResult<u64> {
         exceptions: 0,
     }
 }
+
+pub const FP_UNIMPLEMENTED: u32 = 1 << 5;
+
+pub fn flush_single_result(
+    mut result: FpResult<u32>,
+    mode: RoundingMode,
+    fs: bool,
+) -> FpResult<u32> {
+    if !fs {
+        return result;
+    }
+
+    let value = f32::from_bits(result.value);
+
+    let tiny = value.is_subnormal() || (value == 0.0 && result.exceptions & FP_UNDERFLOW != 0);
+
+    if !tiny {
+        return result;
+    }
+
+    let negative = value.is_sign_negative();
+
+    result.value = match (mode, negative) {
+        (RoundingMode::TowardPositive, false) => 0x0080_0000,
+
+        (RoundingMode::TowardNegative, true) => 0x8080_0000,
+
+        (_, true) => 0x8000_0000,
+
+        (_, false) => 0,
+    };
+
+    result.exceptions |= FP_UNDERFLOW | FP_INEXACT;
+
+    result
+}
+
+pub fn flush_double_result(
+    mut result: FpResult<u64>,
+    mode: RoundingMode,
+    fs: bool,
+) -> FpResult<u64> {
+    if !fs {
+        return result;
+    }
+
+    let value = f64::from_bits(result.value);
+
+    let tiny = value.is_subnormal() || (value == 0.0 && result.exceptions & FP_UNDERFLOW != 0);
+
+    if !tiny {
+        return result;
+    }
+
+    let negative = value.is_sign_negative();
+
+    result.value = match (mode, negative) {
+        (RoundingMode::TowardPositive, false) => 0x0010_0000_0000_0000,
+
+        (RoundingMode::TowardNegative, true) => 0x8010_0000_0000_0000,
+
+        (_, true) => 0x8000_0000_0000_0000,
+
+        (_, false) => 0,
+    };
+
+    result.exceptions |= FP_UNDERFLOW | FP_INEXACT;
+
+    result
+}

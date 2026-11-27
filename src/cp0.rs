@@ -5,7 +5,9 @@ pub const TLB_SIZE: usize = 32;
 
 const CONFIG_RESET: u32 = (1 << 31) | (1 << 10) | (1 << 7) | 2;
 
-const CONFIG1: u32 = ((TLB_SIZE - 1) as u32) << 25;
+const CONFIG1_FP: u32 = 1 << 0;
+
+const CONFIG1: u32 = (((TLB_SIZE - 1) as u32) << 25) | CONFIG1_FP;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeMode {

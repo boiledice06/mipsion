@@ -13,8 +13,9 @@ use crate::mmu::AccessType;
 
 use crate::fpu::{
     RoundingMode, checked_single_to_double, checked_word_to_double, compare_double, compare_single,
-    convert_double_to_word, convert_single_to_word, rounded_double, rounded_double_to_single,
-    rounded_double_unary, rounded_single, rounded_single_unary, rounded_word_to_single,
+    convert_double_to_word, convert_single_to_word, flush_double_result, flush_single_result,
+    rounded_double, rounded_double_to_single, rounded_double_unary, rounded_single,
+    rounded_single_unary, rounded_word_to_single,
 };
 
 pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operation: &Operation) {
@@ -842,6 +843,8 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
 
             let result = rounded_single(operation, lhs, rhs, mode);
+
+            let result = flush_single_result(result, mode, cpu.cp1().flush_subnormals());
             if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
                 cpu.raise_exception(Exception::FloatingPoint, None);
 
@@ -860,6 +863,12 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
 
             let result = rounded_single_unary(operation, operand, mode);
+
+            let result = if matches!(operation, Operation::SqrtS) {
+                flush_single_result(result, mode, cpu.cp1().flush_subnormals())
+            } else {
+                result
+            };
 
             if !matches!(operation, Operation::MovS)
                 && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
@@ -901,6 +910,8 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
             let result = rounded_double(operation, lhs, rhs, mode);
 
+            let result = flush_double_result(result, mode, cpu.cp1().flush_subnormals());
+
             if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
                 cpu.raise_exception(Exception::FloatingPoint, None);
 
@@ -929,6 +940,12 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
             let mode = RoundingMode::from_fcsr(cpu.cp1().rounding_mode());
 
             let result = rounded_double_unary(operation, operand, mode);
+
+            let result = if matches!(operation, Operation::SqrtD) {
+                flush_double_result(result, mode, cpu.cp1().flush_subnormals())
+            } else {
+                result
+            };
 
             if !matches!(operation, Operation::MovD)
                 && cpu.cp1_mut().apply_fp_exceptions(result.exceptions)
@@ -994,6 +1011,8 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
 
                         _ => unreachable!(),
                     };
+
+                    let result = flush_single_result(result, mode, cpu.cp1().flush_subnormals());
 
                     if cpu.cp1_mut().apply_fp_exceptions(result.exceptions) {
                         cpu.raise_exception(Exception::FloatingPoint, None);

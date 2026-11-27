@@ -1,3 +1,11 @@
+use crate::fpu::FP_UNIMPLEMENTED;
+
+const FIR_S: u32 = 1 << 16;
+const FIR_D: u32 = 1 << 17;
+const FIR_W: u32 = 1 << 20;
+
+const FIR_RESET: u32 = FIR_S | FIR_D | FIR_W;
+
 const FCSR_FCC_MASK: u32 = 0xFE80_0000;
 const FCSR_CAUSE_MASK: u32 = 0x0003_F000;
 const FCSR_ENABLE_MASK: u32 = 0x0000_0F80;
@@ -22,7 +30,7 @@ impl Cp1 {
     pub fn new() -> Self {
         Self {
             fpr: [0; 32],
-            fir: 0,
+            fir: FIR_RESET,
             fcsr: 0,
         }
     }
@@ -167,10 +175,7 @@ impl Cp1 {
         let cause = (self.fcsr >> 12) & 0x3F;
         let enables = (self.fcsr >> 7) & 0x1F;
 
-        let unimplemented = cause & 0x20 != 0;
-        let enabled_exception = cause & enables != 0;
-
-        unimplemented || enabled_exception
+        (cause & FP_UNIMPLEMENTED != 0) || (cause & enables != 0)
     }
 
     pub fn read_fcc(&self, cc: u8) -> bool {
@@ -199,17 +204,19 @@ impl Cp1 {
         self.fcsr & FCSR_RM_MASK
     }
 
+    pub fn flush_subnormals(&self) -> bool {
+        self.fcsr & FCSR_FS_MASK != 0
+    }
+
     pub fn apply_fp_exceptions(&mut self, exceptions: u32) -> bool {
         let exceptions = exceptions & 0x3F;
 
-        // Cause: 이번 연산에서 발생한 예외
+        // Replace the current operation's Cause bits.
         self.fcsr = (self.fcsr & !FCSR_CAUSE_MASK) | (exceptions << 12);
 
-        let enables = (self.fcsr >> 7) & 0x1F;
+        let trap = self.exception_requested();
 
-        let trap = (exceptions & enables != 0) || (exceptions & 0x20 != 0);
-
-        // Flag: 비활성화된 예외의 누적 기록
+        // Accumulate sticky Flags only when execution completes.
         if !trap {
             self.fcsr |= (exceptions & 0x1F) << 2;
         }
