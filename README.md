@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.5.0 — Interactive Debugger
+v0.6.0 — Assembler
 
 | Metric | Status |
 | --- | ---: |
@@ -32,10 +32,10 @@ v0.5.0 — Interactive Debugger
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Internal regression tests | 612 / 612 passing |
+| Internal regression tests | 621 / 621 passing |
 | REPL integration tests | 16 / 16 passing |
-| CLI end-to-end tests | 10 / 10 passing |
-| Total tests | 638 / 638 passing |
+| CLI end-to-end tests | 13 / 13 passing |
+| Total tests | 650 / 650 passing |
 | External Rust dependencies | 0 |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Test results reflect verified local debug and release builds, not exhaustive ISA conformance or code coverage.
@@ -112,7 +112,7 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Register and physical memory watchpoints
 - [x] Interactive command-line debugger
 - [x] REPL integration and CLI end-to-end tests
-- [ ] Assembler
+- [x] Assembler
 - [ ] Five-stage pipeline simulation
 - [ ] Cache and hazard simulation
 - [ ] Graphical user interface
@@ -128,6 +128,7 @@ MIPSion separates the reusable emulation library from the command-line interface
 | `cpu/` | CPU state, ALU, instruction execution, CP0, CP1 and FPU |
 | `memory/` | Physical memory, MMU and TLB |
 | `isa/` | Instruction definitions, decoding, disassembly and field extraction |
+| `assembler/` | Source parsing, two-pass symbol resolution and instruction encoding |
 | `loader/` | Raw binary and ELF32 executable loading |
 | `runtime/` | Execution control, tracing, hooks and state inspection |
 | `debugger/` | Debugger sessions, breakpoints, watchpoints, commands and REPL |
@@ -171,6 +172,49 @@ For all available options:
     cargo run -- --help
 
 The emulator has no external Rust dependencies.
+
+## Assembler
+
+```sh
+cargo run -- --assemble examples/delay-slot.s -o delay-slot.bin --load-address 0x1000
+cargo run -- delay-slot.bin --load-address 0x1000 --dump-registers
+cargo run -- --source examples/delay-slot.s --debug
+```
+
+The library entry point is `assembler::assemble(source, load_address)`.
+It returns little-endian bytes, text size, data offset, and absolute symbol
+addresses. Diagnostics carry a one-based line and UTF-8 byte column. CLI
+output requires a new file and pads the image to a multiple of four bytes
+for the raw loader. When running a raw image, use the same load address at
+which it was assembled.
+
+The assembler supports the checklist's 200 entries with functional execution
+paths, including integer, CP0/TLB and basic FR=0 FPU forms. The supported
+syntax includes `$t0` and `$8` GPRs, `$f0` FPRs, `$fcc0` or numeric
+condition codes, and decimal, hexadecimal (`0x`), and binary (`0b`) literals.
+Labels are case-sensitive. Branch and jump operands take absolute addresses
+or labels. Load/store operands use `offset(base)` and an omitted offset
+means zero. Signed immediates use the mathematical signed value.
+
+Text starts at the word-aligned load address. Data follows at the next word
+boundary. `.text` and `.data` switch sections. Data directives are `.byte`,
+`.half`, `.word`, `.space`, `.align` (power-of-two exponent 0–16),
+`.ascii` and `.asciiz`. The assembler enforces a 256 MiB image limit and
+checks alignment and address ranges. Data directives do not implicitly align
+subsequent instructions. Write branch delay slots explicitly.
+
+| Pseudo-instruction | Expansion |
+| --- | --- |
+| `nop` | `sll $zero, $zero, 0` |
+| `move rd, rs` | `addu rd, rs, $zero` |
+| `b target` | `beq $zero, $zero, target` |
+| `bal target` | `bgezal $zero, target` |
+| `li rt, constant` | `lui` plus `ori`, always two words |
+| `la rt, label` | `lui` plus `ori`, always two words |
+
+The assembler emits flat images. Object files, linking and relocations,
+macros, expression arithmetic, automatic delay-slot scheduling, and
+source-level debugger commands are outside this release.
 
 ## Interactive Debugger
 
@@ -277,7 +321,7 @@ The debugger is implemented entirely using the Rust standard library.
 - CP0 and FPU register watchpoints are not yet supported.
 - Symbolic breakpoints and source-level debugging are not yet supported.
 - Command history, tab completion and asynchronous execution interruption are not yet supported.
-- Assembly, pipeline simulation and graphical interfaces are not yet available.
+- Pipeline simulation, cache simulation and graphical interfaces are pending.
 
 ## Goals
 
