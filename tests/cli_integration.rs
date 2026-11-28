@@ -312,3 +312,137 @@ fn cli_pipeline_reports_unsupported_operation() {
             .contains("unsupported pipeline instruction mfc0 (0x40086000) at 0x00000000")
     );
 }
+
+#[test]
+fn cli_cache_geometry_latency_and_pipeline_rates() {
+    let output = execute(
+        &[
+            "--pipeline",
+            "--source",
+            "examples/delay-slot.s",
+            "--forwarding",
+            "--icache",
+            "64:16:1",
+            "--dcache",
+            "128:16:2",
+            "--memory-latency",
+            "2",
+            "--trace",
+        ],
+        "",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    for expected in [
+        "I-cache read miss 00000000 +2",
+        "I-cache read hit",
+        "D-cache read miss 00000020 +2",
+        "D-cache stall",
+        "forward EX/MEM",
+        "I-cache: reads=",
+        "D-cache: reads=1 writes=0 hits=0 misses=1",
+    ] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+    let value = |label: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(label))
+            .unwrap()
+            .trim()
+            .parse::<f64>()
+            .unwrap()
+    };
+    let cycles = value("Cycles:");
+    let retired = value("Retired:");
+    assert_eq!(retired, 6.0);
+    assert!((value("CPI:") - cycles / retired).abs() < 0.001);
+    assert!((value("IPC:") - retired / cycles).abs() < 0.001);
+}
+
+#[test]
+fn cli_rejects_invalid_cache_options() {
+    for (args, expected) in [
+        (
+            vec!["--cache", "examples/hello.elf"],
+            "options require --pipeline",
+        ),
+        (
+            vec!["--pipeline", "--icache", "64:16", "examples/hello.elf"],
+            "requires bytes:line:ways",
+        ),
+        (
+            vec!["--pipeline", "--dcache", "96:16:2", "examples/hello.elf"],
+            "power-of-two number",
+        ),
+        (
+            vec![
+                "--pipeline",
+                "--memory-latency",
+                "0x100000000",
+                "examples/hello.elf",
+            ],
+            "memory latency out of range",
+        ),
+    ] {
+        let output = execute(&args, "");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(stderr(&output).contains(expected), "{}", stderr(&output));
+    }
+}
+
+#[test]
+fn cli_cache_debugger_reset_restores_geometry_and_cold_counters() {
+    let output = execute(
+        &[
+            "--pipeline",
+            "--cache",
+            "--memory-latency",
+            "1",
+            "--debug",
+            "examples/hello.bin",
+        ],
+        "stats\ncycle\nstats\nreset\nstats\ncycle\nquit\n",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert_eq!(
+        text.matches("I-cache read miss 00000000 +1").count(),
+        2,
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("I-cache: reads=0 writes=0 hits=0 misses=0")
+            .count(),
+        2,
+        "{text}"
+    );
+    assert!(
+        text.contains("I-cache: reads=1 writes=0 hits=0 misses=1"),
+        "{text}"
+    );
+    assert!(text.contains("CPI:          n/a"), "{text}");
+}
+
+#[test]
+fn cli_forwarding_without_caches_reduces_cycles_at_equal_retirements() {
+    let run = |extra: &[&str]| {
+        let mut args = vec!["--pipeline", "--source", "examples/delay-slot.s"];
+        args.extend_from_slice(extra);
+        let output = execute(&args, "");
+        assert!(output.status.success(), "{}", stderr(&output));
+        stdout(&output)
+    };
+    let plain = run(&[]);
+    let forwarded = run(&["--forwarding"]);
+    let cycles = |text: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix("Cycles:"))
+            .unwrap()
+            .trim()
+            .parse::<u64>()
+            .unwrap()
+    };
+    assert!(plain.contains("Retired:      6") && forwarded.contains("Retired:      6"));
+    assert!(cycles(&forwarded) < cycles(&plain));
+    assert!(!forwarded.contains("I-cache:"));
+}

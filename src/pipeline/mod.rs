@@ -7,10 +7,10 @@ mod state;
 mod timing;
 mod trace;
 
-pub use timing::{CacheModelConfig, PipelineOptions};
+pub use timing::{CacheModelConfig, PipelineOptions, PipelineStatistics};
 pub use trace::{
     CacheEvent, CachePort, CycleEvent, Forwarded, ForwardingSource, PipelineRegisters, Redirect,
-    Stall, Writeback, format_cycle,
+    Stall, Writeback, format_cycle, format_statistics,
 };
 
 use crate::{
@@ -84,6 +84,15 @@ impl Pipeline {
     }
     pub fn retired(&self) -> u64 {
         self.retired
+    }
+
+    pub fn statistics(&self) -> PipelineStatistics {
+        PipelineStatistics {
+            cycles: self.cycles,
+            retired: self.retired,
+            instruction_cache: self.instruction_cache().map(Cache::stats),
+            data_cache: self.data_cache().map(Cache::stats),
+        }
     }
 
     pub fn options(&self) -> PipelineOptions {

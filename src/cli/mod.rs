@@ -1,3 +1,4 @@
+use crate::{cache::CacheConfig, pipeline::PipelineOptions};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,12 @@ pub enum CliAction {
         config: CliConfig,
         source: bool,
         max_cycles: u64,
+    },
+    RunTimedPipeline {
+        config: CliConfig,
+        source: bool,
+        max_cycles: u64,
+        options: PipelineOptions,
     },
     Assemble {
         source: PathBuf,
@@ -58,6 +65,11 @@ Options:
     --source                   Read the program as UTF-8 assembly
     --pipeline                 Use the five-stage pipeline engine
     --max-cycles <count>       Pipeline cycle limit (default: 5000000)
+    --forwarding               Forward register results in pipeline mode
+    --cache                    Enable instruction and data cache timing
+    --icache <bytes:line:ways> Instruction cache geometry (enables caches)
+    --dcache <bytes:line:ways> Data cache geometry (enables caches)
+    --memory-latency <cycles>  Extra cycles per miss (enables caches, default: 8)
     --debug                    Start interactive debugger
 
 Numbers may be decimal or hexadecimal (0x prefix).
@@ -108,6 +120,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     let mut source = false;
     let mut pipeline = false;
     let mut max_cycles = None;
+    let mut timing = PipelineOptions::default();
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -179,6 +192,30 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
 
             "--pipeline" => pipeline = true,
 
+            "--forwarding" => timing.forwarding = true,
+
+            "--cache" => {
+                timing.caches.get_or_insert_default();
+            }
+
+            "--icache" | "--dcache" => {
+                let value = next_value(&mut args, &arg)?;
+                let geometry = parse_geometry(&value, &arg)?;
+                let caches = timing.caches.get_or_insert_default();
+                if arg == "--icache" {
+                    caches.instruction = geometry;
+                } else {
+                    caches.data = geometry;
+                }
+            }
+
+            "--memory-latency" => {
+                let value = next_value(&mut args, &arg)?;
+                let latency = u32::try_from(parse_number(&value)?)
+                    .map_err(|_| format!("memory latency out of range: {value}"))?;
+                timing.caches.get_or_insert_default().miss_latency = latency;
+            }
+
             "--max-cycles" => max_cycles = Some(parse_number(&next_value(&mut args, &arg)?)?),
 
             "--source" => {
@@ -249,7 +286,17 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     if max_cycles.is_some() && !pipeline {
         return Err("--max-cycles requires --pipeline".into());
     }
-    Ok(if pipeline {
+    if timing != PipelineOptions::default() && !pipeline {
+        return Err("cache and forwarding options require --pipeline".into());
+    }
+    Ok(if timing != PipelineOptions::default() {
+        CliAction::RunTimedPipeline {
+            config,
+            source,
+            max_cycles: max_cycles.unwrap_or(5_000_000),
+            options: timing,
+        }
+    } else if pipeline {
         CliAction::RunPipeline {
             config,
             source,
@@ -260,6 +307,24 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     } else {
         CliAction::Run(config)
     })
+}
+
+fn parse_geometry(value: &str, flag: &str) -> Result<CacheConfig, String> {
+    let mut parts = value.split(':');
+    let mut next = || {
+        let number = parts
+            .next()
+            .ok_or_else(|| format!("{flag} requires bytes:line:ways"))?;
+        u32::try_from(parse_number(number)?)
+            .map_err(|_| format!("{flag} value out of range: {number}"))
+    };
+    let capacity = next()?;
+    let line = next()?;
+    let ways = next()?;
+    if parts.next().is_some() {
+        return Err(format!("{flag} requires bytes:line:ways"));
+    }
+    CacheConfig::new(capacity, line, ways).map_err(|error| format!("{flag}: {error}"))
 }
 
 fn parse_assembly(mut args: impl Iterator<Item = String>) -> Result<CliAction, String> {

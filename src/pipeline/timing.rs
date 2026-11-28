@@ -1,5 +1,5 @@
 use super::trace::{CacheEvent, CachePort};
-use crate::cache::{AccessResult, Cache, CacheAccess, CacheConfig};
+use crate::cache::{AccessResult, Cache, CacheAccess, CacheConfig, CacheStats};
 use crate::memory::Memory;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,24 @@ impl Default for CacheModelConfig {
 pub struct PipelineOptions {
     pub caches: Option<CacheModelConfig>,
     pub forwarding: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PipelineStatistics {
+    pub cycles: u64,
+    pub retired: u64,
+    pub instruction_cache: Option<CacheStats>,
+    pub data_cache: Option<CacheStats>,
+}
+
+impl PipelineStatistics {
+    pub fn cpi(self) -> Option<f64> {
+        (self.retired != 0).then(|| self.cycles as f64 / self.retired as f64)
+    }
+
+    pub fn ipc(self) -> Option<f64> {
+        (self.cycles != 0).then(|| self.retired as f64 / self.cycles as f64)
+    }
 }
 
 pub(super) struct CacheTiming {
