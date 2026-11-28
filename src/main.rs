@@ -1,43 +1,82 @@
-use mipsion::{cli, cpu, elf, inspection, loader, memory, runtime, trace};
+use mipsion::{assembler, cli, cpu, elf, inspection, loader, memory, runtime, trace};
+use std::path::Path;
+use std::process::ExitCode;
 
-fn main() -> std::process::ExitCode {
+fn main() -> ExitCode {
     use cli::{CliAction, parse_args};
-    use std::process::ExitCode;
 
     let action = match parse_args(std::env::args().skip(1)) {
         Ok(action) => action,
-
         Err(error) => {
             eprintln!("Error: {error}");
             eprintln!("Use --help for usage information.");
-
             return ExitCode::from(2);
         }
     };
 
-    match action {
+    let result = match action {
         CliAction::Help => {
             print!("{}", cli::HELP);
-            ExitCode::SUCCESS
+            return ExitCode::SUCCESS;
         }
-
         CliAction::Version => {
             println!("MIPSion {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
+            return ExitCode::SUCCESS;
         }
-
-        CliAction::Run(config) => match run_program(config) {
-            Ok(()) => ExitCode::SUCCESS,
-
-            Err(error) => {
-                eprintln!("Error: {error}");
-                ExitCode::FAILURE
-            }
-        },
+        CliAction::Run(config) => run_program(config, false),
+        CliAction::RunSource(config) => run_program(config, true),
+        CliAction::Assemble {
+            source,
+            output,
+            load_address,
+        } => write_assembly(&source, &output, load_address),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-fn run_program(config: cli::CliConfig) -> Result<(), String> {
+fn read_assembly(path: &Path, load_address: u32) -> Result<Vec<u8>, String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut bytes = assembler::assemble(&source, load_address)
+        .map_err(|error| format!("{}:{error}", path.display()))?
+        .bytes;
+    if bytes.is_empty() {
+        return Err(format!(
+            "{}: assembly produced an empty image",
+            path.display()
+        ));
+    }
+    bytes.resize(bytes.len().next_multiple_of(4), 0);
+    Ok(bytes)
+}
+
+fn write_assembly(source: &Path, output: &Path, load_address: u32) -> Result<(), String> {
+    use std::io::Write;
+
+    let bytes = read_assembly(source, load_address)?;
+    let mut file = std::fs::File::create_new(output)
+        .map_err(|error| format!("failed to create {}: {error}", output.display()))?;
+    if let Err(error) = file.write_all(&bytes) {
+        drop(file);
+        let detail = match std::fs::remove_file(output) {
+            Ok(()) => String::new(),
+            Err(cleanup) => format!(" (failed to remove partial file: {cleanup})"),
+        };
+        return Err(format!(
+            "failed to write {}: {error}{detail}",
+            output.display()
+        ));
+    }
+    Ok(())
+}
+
+fn run_program(config: cli::CliConfig, source: bool) -> Result<(), String> {
     use cpu::Cpu;
     use loader::load_raw;
     use memory::Memory;
@@ -49,8 +88,12 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
         return Err("memory size exceeds 256 MiB limit".into());
     }
 
-    let bytes = std::fs::read(&config.program)
-        .map_err(|error| format!("failed to read {}: {error}", config.program.display()))?;
+    let bytes = if source {
+        read_assembly(&config.program, config.load_address)?
+    } else {
+        std::fs::read(&config.program)
+            .map_err(|error| format!("failed to read {}: {error}", config.program.display()))?
+    };
 
     let mut memory = Memory::new(config.memory_size);
     let mut cpu = Cpu::new();
@@ -61,7 +104,7 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
         return Err("memory dump range is out of bounds".into());
     }
 
-    let is_elf = bytes.starts_with(b"\x7FELF");
+    let is_elf = !source && bytes.starts_with(b"\x7FELF");
 
     let (entry, format) = if is_elf {
         let result = elf::load_elf(&mut memory, &bytes)
@@ -74,7 +117,7 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
         load_raw(&mut memory, config.load_address, &bytes)
             .map_err(|error| format!("failed to load program: {error:?}"))?;
 
-        (config.entry, "Raw Binary")
+        (config.entry, if source { "Assembly" } else { "Raw Binary" })
     };
 
     cpu.write_pc(entry);

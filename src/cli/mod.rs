@@ -19,6 +19,12 @@ pub struct CliConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliAction {
     Run(CliConfig),
+    RunSource(CliConfig),
+    Assemble {
+        source: PathBuf,
+        output: PathBuf,
+        load_address: u32,
+    },
     Help,
     Version,
 }
@@ -28,6 +34,7 @@ MIPSion - MIPS32 Release 2 Emulator
 
 Usage:
     mipsion <program> [options]
+    mipsion --assemble <source> -o <output> [--load-address <addr>]
 
 Options:
     --load-address <addr>      Program load address
@@ -43,8 +50,7 @@ Options:
     --dump-memory <addr> <size>
                                Display physical memory contents
     --trace                    Trace instruction execution
-    --load-address <addr>      Raw binary load address
-    --entry <addr>             Raw binary entry point
+    --source                   Read the program as UTF-8 assembly
     --debug                    Start interactive debugger
 
 Numbers may be decimal or hexadecimal (0x prefix).
@@ -73,7 +79,11 @@ fn next_value(args: &mut impl Iterator<Item = String>, option: &str) -> Result<S
 }
 
 pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, String> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
+    if args.peek().is_some_and(|arg| arg == "--assemble") {
+        args.next();
+        return parse_assembly(args);
+    }
 
     let mut program = None;
     let mut load_address = 0;
@@ -88,6 +98,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     let mut trace = false;
 
     let mut debug = false;
+    let mut source = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -157,6 +168,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
                 trace = true;
             }
 
+            "--source" => {
+                source = true;
+            }
+
             "--debug" => {
                 debug = true;
             }
@@ -204,7 +219,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
             .into());
     }
 
-    Ok(CliAction::Run(CliConfig {
+    let config = CliConfig {
         program,
         load_address,
         entry,
@@ -217,5 +232,38 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         dump_memory,
         trace,
         debug,
-    }))
+    };
+    Ok(if source {
+        CliAction::RunSource(config)
+    } else {
+        CliAction::Run(config)
+    })
+}
+
+fn parse_assembly(mut args: impl Iterator<Item = String>) -> Result<CliAction, String> {
+    let mut source = None;
+    let mut output = None;
+    let mut load_address = 0;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-h" | "--help" => return Ok(CliAction::Help),
+            "-o" | "--output" if output.is_none() => {
+                output = Some(PathBuf::from(next_value(&mut args, &arg)?));
+            }
+            "--load-address" => load_address = parse_address(&next_value(&mut args, &arg)?)?,
+            _ if arg.starts_with('-') => {
+                return Err(format!("unknown or repeated assembler option: {arg}"));
+            }
+            _ if source.is_none() => source = Some(PathBuf::from(arg)),
+            _ => return Err(format!("unexpected assembler argument: {arg}")),
+        }
+    }
+    if load_address & 3 != 0 {
+        return Err("load address must be word-aligned".into());
+    }
+    Ok(CliAction::Assemble {
+        source: source.ok_or("missing assembly source path")?,
+        output: output.ok_or("missing assembly output path (-o)")?,
+        load_address,
+    })
 }

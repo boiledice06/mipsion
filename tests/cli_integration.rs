@@ -176,3 +176,59 @@ fn cli_normal_trace_is_unchanged() {
     assert!(text.contains("[000001]"));
     assert!(text.contains("Execution finished"));
 }
+
+#[test]
+fn cli_assembler_pads_raw_output_and_runs_delay_slot() {
+    let output_path =
+        std::env::temp_dir().join(format!("mipsion-assembler-{}.bin", std::process::id()));
+    let path = output_path.to_str().unwrap();
+    let build = execute(
+        &[
+            "--assemble",
+            "examples/delay-slot.s",
+            "-o",
+            path,
+            "--load-address",
+            "0x1000",
+        ],
+        "",
+    );
+    assert!(build.status.success(), "{}", stderr(&build));
+    let binary = std::fs::read(&output_path).unwrap();
+    assert_eq!(binary.len(), 36);
+    assert_eq!(&binary[..4], &[41, 0, 8, 0x24]);
+    assert_eq!(&binary[32..], &[0x5a, 0, 0, 0]);
+
+    let repeat = execute(&["--assemble", "examples/delay-slot.s", "-o", path], "");
+    assert!(!repeat.status.success());
+    assert_eq!(std::fs::read(&output_path).unwrap(), binary);
+
+    let output = execute(&[path, "--load-address", "0x1000", "--dump-registers"], "");
+    std::fs::remove_file(output_path).unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("$t0   0000002A"), "{text}");
+    assert!(text.contains("$t2   0000005A"), "{text}");
+}
+
+#[test]
+fn cli_debugger_loads_and_steps_assembly() {
+    let output = execute(
+        &["examples/delay-slot.s", "--source", "--debug"],
+        "step\nstep\nstep\nregs\nquit\n",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("Format:       Assembly"), "{text}");
+    assert!(text.contains("$t0   0000002A"), "{text}");
+    assert!(text.contains("00000010"), "{text}");
+}
+
+#[test]
+fn cli_assembler_reports_the_input_path_and_source_location() {
+    let output = execute(&["--source", "tests/fixtures/invalid-assembly.s"], "");
+    assert_eq!(output.status.code(), Some(1));
+    let text = stderr(&output);
+    assert!(text.contains("invalid-assembly.s:2:21"), "{text}");
+    assert!(text.contains("outside -32768..=32767"), "{text}");
+}
