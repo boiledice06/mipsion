@@ -1,8 +1,12 @@
+mod breakpoint;
 mod cli;
+mod command;
 mod control_flow;
 mod cp0;
 mod cp1;
+mod debugger;
 mod decoder;
+mod disassembler;
 mod elf;
 mod exception;
 mod fpu;
@@ -15,6 +19,7 @@ mod mmu;
 mod runtime;
 mod tlb;
 mod trace;
+mod watchpoint;
 
 use crate::cpu::Cpu;
 use crate::memory::Memory;

@@ -20,6 +20,7 @@ const FCSR_WRITE_MASK: u32 = FCSR_FCC_MASK
     | FCSR_FS_MASK
     | FCSR_RM_MASK;
 
+#[derive(Clone)]
 pub struct Cp1 {
     fpr: [u64; 32],
     fir: u32,

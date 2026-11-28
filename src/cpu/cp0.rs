@@ -17,6 +17,7 @@ pub enum PrivilegeMode {
     Reserved,
 }
 
+#[derive(Clone)]
 pub struct Cp0 {
     bad_vaddr: u32,
     status: u32,

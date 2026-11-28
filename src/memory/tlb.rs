@@ -84,6 +84,7 @@ impl TlbEntry {
     }
 }
 
+#[derive(Clone)]
 pub struct Tlb {
     entries: [Option<TlbEntry>; TLB_SIZE],
 }

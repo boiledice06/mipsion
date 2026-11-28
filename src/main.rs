@@ -95,6 +95,18 @@ fn run_program(config: cli::CliConfig) -> Result<(), String> {
         println!("Stack:        {:#010X}", cpu.read_reg(29));
     }
 
+    if config.debug {
+        use mipsion::debugger::{DebuggerSession, run_repl};
+
+        let mut session = DebuggerSession::new(cpu, memory);
+
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+
+        return run_repl(&mut session, stdin.lock(), stdout.lock(), config.max_steps)
+            .map_err(|error| format!("debugger I/O error: {error}"));
+    }
+
     let execution_config = ExecutionConfig {
         max_steps: config.max_steps,
         stop_on_exception: config.stop_on_exception,

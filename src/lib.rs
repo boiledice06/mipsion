@@ -7,6 +7,8 @@ pub mod loader;
 pub mod memory;
 pub mod runtime;
 
+pub mod debugger;
+
 // Compatibility re-exports
 pub use cpu::{alu, cp0, cp1, exception, executor, fpu};
 pub use isa::{decoder, instruction};

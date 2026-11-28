@@ -1,6 +1,7 @@
 pub mod mmu;
 pub mod tlb;
 
+#[derive(Clone)]
 pub struct Memory {
     data: Vec<u8>,
 }

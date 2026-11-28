@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.4.0 — Program Loader and CLI
+v0.5.0 — Interactive Debugger
 
 | Metric | Status |
 | --- | ---: |
@@ -32,9 +32,13 @@ v0.4.0 — Program Loader and CLI
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Regression tests | 491 / 491 passing |
+| Internal regression tests | 612 / 612 passing |
+| REPL integration tests | 16 / 16 passing |
+| CLI end-to-end tests | 10 / 10 passing |
+| Total tests | 638 / 638 passing |
+| External Rust dependencies | 0 |
 
-The ISA count excludes three assembly idioms and includes optional instruction families. Regression results reflect the latest reported local run, not exhaustive ISA conformance or code coverage.
+The ISA count excludes three assembly idioms and includes optional instruction families. Test results reflect verified local debug and release builds, not exhaustive ISA conformance or code coverage.
 
 - [x] CPU state, GPRs and HI/LO registers
 - [x] Byte-addressable, little-endian memory
@@ -100,8 +104,15 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] ELF32 little-endian MIPS executable loading
 - [x] PT_LOAD segment loading and BSS initialization
 - [x] ELF entry point and stack pointer initialization
+- [x] Instruction disassembler
+- [x] Stateful debugger session
+- [x] Single-step and bounded continuous execution
+- [x] Full CPU and memory reset
+- [x] Virtual-address execution breakpoints
+- [x] Register and physical memory watchpoints
+- [x] Interactive command-line debugger
+- [x] REPL integration and CLI end-to-end tests
 - [ ] Assembler
-- [ ] Interactive debugger
 - [ ] Five-stage pipeline simulation
 - [ ] Cache and hazard simulation
 - [ ] Graphical user interface
@@ -116,19 +127,24 @@ MIPSion separates the reusable emulation library from the command-line interface
 | --- | --- |
 | `cpu/` | CPU state, ALU, instruction execution, CP0, CP1 and FPU |
 | `memory/` | Physical memory, MMU and TLB |
-| `isa/` | Instruction definitions, decoding and field extraction |
+| `isa/` | Instruction definitions, decoding, disassembly and field extraction |
 | `loader/` | Raw binary and ELF32 executable loading |
-| `runtime/` | Execution control, tracing and state inspection |
+| `runtime/` | Execution control, tracing, hooks and state inspection |
+| `debugger/` | Debugger sessions, breakpoints, watchpoints, commands and REPL |
 | `cli/` | Command-line argument parsing |
-| `tests/` | Domain-specific regression tests and shared helpers |
+| `src/tests/` | Internal regression tests and shared helpers |
+| `tests/` | Public API integration and CLI end-to-end tests |
 | `lib.rs` | Reusable emulator library |
 | `main.rs` | Command-line application entry point |
 | `build.rs` | Build-time ISA table generation |
 
-The emulation library is independent of the application entry point,
-allowing future debugger and graphical interfaces to reuse the same core.
+The emulation library is independent of the application entry point.
 
-Regression tests are organized by architectural domain.
+The interactive debugger reuses the same execution core through
+stateful sessions and runtime execution hooks.
+
+Tests are organized by architectural domain, with separate
+integration tests for the public debugger API and executable CLI.
 
 ## Getting Started
 
@@ -155,6 +171,80 @@ For all available options:
     cargo run -- --help
 
 The emulator has no external Rust dependencies.
+
+## Interactive Debugger
+
+Launch the debugger with a raw binary or ELF executable:
+
+```sh
+cargo run -- --debug examples/hello.elf
+cargo run -- --debug examples/hello.bin
+```
+
+### Example Session
+
+```text
+MIPSion Interactive Debugger
+Type 'help' for available commands.
+
+00001000  2408002A  addiu $t0, $zero, 42
+(mipsion) break 0x1004
+Breakpoint added: 0x00001004
+(mipsion) watch t0
+Watchpoint added: $t0
+(mipsion) continue
+Watchpoint hit: $t0
+  0x0 -> 0x2A
+Steps: 1
+00001004  25090001  addiu $t1, $t0, 1
+(mipsion) continue
+Breakpoint hit: 0x00001004
+Steps: 0
+00001004  25090001  addiu $t1, $t0, 1
+(mipsion) step
+[000002] PC=00001004  25090001  addiu
+         $t1: 00000000 -> 0000002B
+         PC -> 00001008
+00001008  0000000C  syscall
+```
+
+### Debugger Commands
+
+| Command | Alias | Description |
+| --- | --- | --- |
+| `help` | `h` | Show available commands |
+| `step` | `s` | Execute one CPU step |
+| `continue [count]` | `c` | Resume bounded execution |
+| `reset` | `r` | Restore the initial machine state |
+| `regs` | | Inspect general-purpose registers |
+| `cp0` | | Inspect system control registers |
+| `fpu` | | Inspect floating-point registers |
+| `pc` | | Inspect PC and next PC |
+| `disasm [addr] [count]` | `d` | Disassemble instructions |
+| `mem <addr> <size>` | `m` | Dump physical memory |
+| `break <addr>` | `b` | Add an execution breakpoint |
+| `delete <addr>` | | Remove a breakpoint |
+| `breakpoints` | `bl` | List breakpoints |
+| `clear-breakpoints` | | Remove all breakpoints |
+| `watch <reg>` | `w` | Watch register value changes |
+| `unwatch <reg>` | | Remove a register watchpoint |
+| `watchmem <addr> <width>` | `wm` | Watch physical memory changes |
+| `unwatchmem <addr> <width>` | | Remove a memory watchpoint |
+| `watchpoints` | `wl` | List watchpoints |
+| `clear-watchpoints` | | Remove all watchpoints |
+| `status` | | Display debugger session status |
+| `quit` | `q` | Exit the debugger |
+
+Breakpoints use virtual addresses and stop before instruction execution.
+
+Watchpoints detect value changes after execution. General-purpose
+registers, HI/LO and physical memory are supported. Memory
+watchpoints support widths of 1, 2, 4 and 8 bytes.
+
+Reset restores the initial CPU and memory state while preserving
+breakpoint and watchpoint configurations.
+
+The debugger is implemented entirely using the Rust standard library.
 
 ## Current Limitations
 
@@ -183,7 +273,11 @@ The emulator has no external Rust dependencies.
 - FR=1, optional formats and full exception conformance remain incomplete.
 - Unimplemented Operation request handling is supported, but complete architectural trigger conditions remain pending.
 - Optional coprocessors other than CP1 are not implemented.
-- Interactive debugging, assembly and graphical interfaces are not yet available.
+- Watchpoints detect value changes rather than individual memory access events.
+- CP0 and FPU register watchpoints are not yet supported.
+- Symbolic breakpoints and source-level debugging are not yet supported.
+- Command history, tab completion and asynchronous execution interruption are not yet supported.
+- Assembly, pipeline simulation and graphical interfaces are not yet available.
 
 ## Goals
 

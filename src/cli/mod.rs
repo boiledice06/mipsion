@@ -13,6 +13,7 @@ pub struct CliConfig {
     pub dump_fpu: bool,
     pub dump_memory: Option<(u32, usize)>,
     pub trace: bool,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,11 +45,12 @@ Options:
     --trace                    Trace instruction execution
     --load-address <addr>      Raw binary load address
     --entry <addr>             Raw binary entry point
+    --debug                    Start interactive debugger
 
 Numbers may be decimal or hexadecimal (0x prefix).
 ";
 
-fn parse_number(value: &str) -> Result<u64, String> {
+pub(crate) fn parse_number(value: &str) -> Result<u64, String> {
     let result = if let Some(hex) = value
         .strip_prefix("0x")
         .or_else(|| value.strip_prefix("0X"))
@@ -61,7 +63,7 @@ fn parse_number(value: &str) -> Result<u64, String> {
     result.map_err(|_| format!("invalid number: {value}"))
 }
 
-fn parse_address(value: &str) -> Result<u32, String> {
+pub(crate) fn parse_address(value: &str) -> Result<u32, String> {
     u32::try_from(parse_number(value)?).map_err(|_| format!("address out of range: {value}"))
 }
 
@@ -84,6 +86,8 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
     let mut dump_fpu = false;
     let mut dump_memory = None;
     let mut trace = false;
+
+    let mut debug = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -153,6 +157,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
                 trace = true;
             }
 
+            "--debug" => {
+                debug = true;
+            }
+
             _ if arg.starts_with('-') => {
                 return Err(format!("unknown option: {arg}"));
             }
@@ -183,6 +191,19 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         return Err("entry point must be word-aligned".into());
     }
 
+    if debug
+        && (trace
+            || !stop_on_exception
+            || dump_registers
+            || dump_cp0
+            || dump_fpu
+            || dump_memory.is_some())
+    {
+        return Err("--debug cannot be combined with trace, \
+            dump options or --continue-on-exception"
+            .into());
+    }
+
     Ok(CliAction::Run(CliConfig {
         program,
         load_address,
@@ -195,5 +216,6 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         dump_fpu,
         dump_memory,
         trace,
+        debug,
     }))
 }

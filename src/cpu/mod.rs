@@ -17,6 +17,7 @@ use crate::exception::Exception;
 
 use crate::mmu::{AccessType, Mmu, TranslationMode};
 
+#[derive(Clone)]
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
     pc: u32,        // Program Counter
@@ -64,6 +65,20 @@ impl Cpu {
         if index != 0 {
             self.gpr[index] = value;
         }
+    }
+
+    pub fn peek_instruction(&self, memory: &Memory, address: u32) -> Result<u32, Exception> {
+        if address & 3 != 0 {
+            return Err(Exception::AddressErrorLoad);
+        }
+
+        let physical = self.resolve_address(address, AccessType::Fetch)?;
+
+        if !memory.contains_range(physical, 4) {
+            return Err(Exception::InstructionBusError);
+        }
+
+        Ok(memory.read_word(physical))
     }
 
     pub fn fetch(&mut self, memory: &Memory) -> Option<u32> {
@@ -244,19 +259,20 @@ impl Cpu {
         self.reservation = None;
     }
 
-    pub fn translate_address(&mut self, address: u32, access: AccessType) -> Option<u32> {
-        let result = match self.translation_mode {
+    pub fn resolve_address(&self, address: u32, access: AccessType) -> Result<u32, Exception> {
+        match self.translation_mode {
             TranslationMode::Bare => Mmu::translate(address, self.cp0.privilege_mode(), access),
 
             TranslationMode::Tlb => Mmu::translate_with_tlb(address, &self.cp0, access),
-        };
+        }
+    }
 
-        match result {
+    pub fn translate_address(&mut self, address: u32, access: AccessType) -> Option<u32> {
+        match self.resolve_address(address, access) {
             Ok(physical) => Some(physical),
 
             Err(exception) => {
                 self.raise_exception(exception, Some(address));
-
                 None
             }
         }
