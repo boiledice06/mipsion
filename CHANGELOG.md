@@ -2,6 +2,34 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.7.0] - Five-stage Pipeline Simulation
+
+### Added
+
+- Separate in-order IF/ID/EX/MEM/WB integer engine with explicit latches
+  and in-order register and store retirement.
+- Conservative RAW interlocks, load/store alignment and translation,
+  integer branch and jump resolution, delay slots, and branch-likely annulment.
+- Precise WB exception delivery, flushing, and explicit diagnostics for
+  unsupported defined instructions.
+- Typed cycle events, `--pipeline` engine selection, and debugger cycle
+  stepping, state inspection and reset.
+- Retirement comparisons against the functional CPU, including faulting
+  delay slots and a store that replaces a fetched instruction.
+
+### Validation
+
+- 667 tests in debug and release (634 library, 17 CLI, 16 debugger).
+- Optimized CLI pipeline and pipeline debugger smoke tests.
+- Formatting, Clippy with warnings denied, and Git whitespace checks.
+- Zero external Rust dependencies.
+
+### Known limitations
+
+- Timing coverage is limited to the documented integer subset.
+- The model has no forwarding or cache timing in this release.
+- Pipeline debug commands cover cycle stepping and committed state.
+
 ## [0.6.0] - Assembler
 
 ### Added
