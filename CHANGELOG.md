@@ -2,6 +2,58 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.5.0] - Interactive Debugger
+
+### Added
+
+- Instruction disassembly with register and operand formatting.
+- Virtual-address branch and jump target formatting.
+- Stateful debugger sessions with non-mutating instruction inspection.
+- Single-step execution with structured trace events.
+- Bounded continuous execution with exception-aware termination.
+- Full CPU and memory snapshots for session reset.
+- Virtual-address execution breakpoints.
+- Breakpoint-aware execution resumption.
+- General-purpose register and HI/LO watchpoints.
+- Physical memory watchpoints with 8-, 16-, 32- and 64-bit widths.
+- Multiple simultaneous watchpoint hit reporting.
+- Interactive command parser and debugger REPL.
+- ELF and raw binary debugging through the --debug CLI option.
+- Interactive register, CP0, FPU and memory inspection.
+- Breakpoint and watchpoint configuration persistence across resets.
+- Public debugger API integration tests.
+- Executable CLI end-to-end tests.
+
+### Changed
+
+- Reorganized source files into domain-specific modules.
+- Added reusable runtime execution hooks.
+- Shared the execution core between standalone and interactive modes.
+- Separated internal regression tests from external integration tests.
+- Preserved compatibility with existing program loading and trace execution modes.
+
+### Validation
+
+- 638 tests passing (+147 since v0.4.0).
+- 612 internal regression tests.
+- 16 debugger REPL integration tests.
+- 10 CLI end-to-end tests.
+- All tests passing in debug and release configurations.
+- Clippy validation with warnings treated as errors.
+- Verified interactive ELF execution using the optimized release binary.
+- Zero external Rust dependencies.
+- 200 of 291 ISA entries with execution paths (68.73%).
+
+### Known limitations
+
+- Full MIPS32 Release 2 conformance remains incomplete.
+- Watchpoints detect value changes, not individual read or write accesses.
+- CP0 and FPU register watchpoints are not yet supported.
+- Symbolic breakpoints and source-level debugging are not supported.
+- Asynchronous debugger interruption, command history and completion are pending.
+- Linux system calls and dynamic executable linking remain unsupported.
+- Assembly, cycle-accurate simulation and graphical interfaces are pending.
+
 ## [0.4.0] - Program Loader and CLI
 
 ### Added
@@ -97,4 +149,3 @@ All notable changes to MIPSion are documented here.
 
 - 145 regression tests.
 - 114 of 291 ISA entries with execution paths.
-

@@ -29,7 +29,7 @@
 | 명령어 합계 | **291** |
 | Idiom | 3 |
 
-현재 실행 경로는 200/291개(68.73%)이며 CPU 필수 105개와 FPU 기본 86개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 132개, 대기 91개이며 별칭 3개는 분모에서 제외한다. 사용자 보고 기준 회귀 테스트는 386/386 통과했다.
+현재 실행 경로는 200/291개(68.73%)이며 CPU 필수 105개와 FPU 기본 86개 모두에 기본 실행 경로가 존재한다. 구현 68개, 부분 구현 132개, 대기 91개이며 별칭 3개는 분모에서 제외한다. v0.5.0 기준 내부 회귀 테스트 612개, REPL 통합 테스트 16개, CLI End-to-End 테스트 10개를 포함한 전체 638/638개 테스트가 Debug 및 Release 빌드에서 모두 통과했다.
 
 이는 명령어별 전체 명세 적합성이나 코드 커버리지 100%를 의미하지 않는다.
 
@@ -45,6 +45,12 @@ v0.2.0에서는 CP0 register 접근, privilege mode, exception vector, ERET, tim
 Bare Mode는 기존 회귀 테스트와의 호환성을 위해 유지하며, TLB Mode에서 실제 virtual address translation을 수행한다. 물리 메모리 범위 검사, 완전한 CP0 명세, 중복 TLB entry 처리, cache 및 execution hazard는 후속 구현 대상이다.
 
 v0.3.0 (Batch 43): FPU 기본 명령어 86개 전체의 실행 경로, 5종 산술 예외 기본 판별, 4가지 반올림 모드 및 S/D/W 형변환을 지원한다. Config1.FP 및 FIR의 S/D/W 기능 광고를 적용했다. FCSR.FS 기반의 기본 결과 flush 정책을 구현했다. Cause/Enable 2048개 조합, Sticky Flag, Unimplemented Operation 예외 요청, FP Trap의 delay slot 처리 및 destination 보존을 검증했다. 전체 명세 적합성 및 독립 참조 연산기 검증은 남아 있다.
+
+v0.4.0에서는 물리 메모리 범위 검사, 버스 예외, RAW 및 ELF32 로딩, 실행 제어, CLI, 레지스터 및 메모리 검사, 명령어 Trace를 지원한다.
+
+v0.5.0에서는 Disassembler, Debugger Session, Step/Continue/Reset, 실행 Breakpoint, 레지스터 및 물리 메모리 Watchpoint, Interactive REPL을 지원한다.
+
+v0.5.0은 실행 및 디버깅 환경의 확장에 집중한 릴리스로, ISA 실행 경로 집계에는 변화가 없다.
 
 ## 작업 순서
 
