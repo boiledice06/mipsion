@@ -1,3 +1,4 @@
+mod breakpoint;
 mod cli;
 mod control_flow;
 mod cp0;

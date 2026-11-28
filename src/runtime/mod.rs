@@ -9,6 +9,11 @@ use crate::trace::{CpuSnapshot, TraceEvent};
 pub enum StopReason {
     Halted,
     StepLimit,
+
+    Breakpoint {
+        address: u32,
+    },
+
     Exception {
         code: u32,
         epc: u32,
@@ -39,7 +44,7 @@ pub struct ExecutionResult {
 }
 
 pub fn run(cpu: &mut Cpu, memory: &mut Memory, config: ExecutionConfig) -> ExecutionResult {
-    run_internal(cpu, memory, config, None)
+    run_internal(cpu, memory, config, None, None)
 }
 
 pub fn run_with_trace(
@@ -48,7 +53,16 @@ pub fn run_with_trace(
     config: ExecutionConfig,
     mut callback: impl FnMut(&TraceEvent),
 ) -> ExecutionResult {
-    run_internal(cpu, memory, config, Some(&mut callback))
+    run_internal(cpu, memory, config, Some(&mut callback), None)
+}
+
+pub fn run_with_stop_condition(
+    cpu: &mut Cpu,
+    memory: &mut Memory,
+    config: ExecutionConfig,
+    mut should_stop: impl FnMut(u32) -> bool,
+) -> ExecutionResult {
+    run_internal(cpu, memory, config, None, Some(&mut should_stop))
 }
 
 fn run_internal(
@@ -56,6 +70,7 @@ fn run_internal(
     memory: &mut Memory,
     config: ExecutionConfig,
     mut callback: Option<&mut dyn FnMut(&TraceEvent)>,
+    mut should_stop: Option<&mut dyn FnMut(u32) -> bool>,
 ) -> ExecutionResult {
     let mut steps = 0;
 
@@ -66,6 +81,14 @@ fn run_internal(
 
         if steps >= config.max_steps {
             break StopReason::StepLimit;
+        }
+
+        let pc = cpu.read_pc();
+
+        if let Some(condition) = should_stop.as_mut()
+            && condition(pc)
+        {
+            break StopReason::Breakpoint { address: pc };
         }
 
         let previous_exception_count = cpu.exception_count();

@@ -5,7 +5,9 @@ use crate::memory::Memory;
 use crate::runtime::inspection::{dump_cp0, dump_fpu, dump_memory, dump_registers};
 
 use crate::runtime::trace::{CpuSnapshot, TraceEvent};
-use crate::runtime::{ExecutionConfig, ExecutionResult, run};
+use crate::runtime::{ExecutionConfig, ExecutionResult, StopReason, run_with_stop_condition};
+
+use super::breakpoint::Breakpoints;
 
 pub struct DebuggerSession {
     cpu: Cpu,
@@ -16,6 +18,9 @@ pub struct DebuggerSession {
     entry_point: u32,
 
     steps: u64,
+
+    breakpoints: Breakpoints,
+    last_breakpoint: Option<u32>,
 }
 
 impl DebuggerSession {
@@ -32,7 +37,11 @@ impl DebuggerSession {
             initial_cpu,
             initial_memory,
             entry_point,
+
             steps: 0,
+
+            breakpoints: Breakpoints::new(),
+            last_breakpoint: None,
         }
     }
 
@@ -105,6 +114,8 @@ impl DebuggerSession {
             return None;
         }
 
+        self.last_breakpoint = None;
+
         let before = CpuSnapshot::capture(&self.cpu);
 
         self.cpu.step(&mut self.memory);
@@ -120,9 +131,32 @@ impl DebuggerSession {
             stop_on_exception: true,
         };
 
-        let result = run(&mut self.cpu, &mut self.memory, config);
+        let mut skip_breakpoint = self.last_breakpoint == Some(self.pc());
+
+        let breakpoints = &self.breakpoints;
+
+        let result = run_with_stop_condition(&mut self.cpu, &mut self.memory, config, |pc| {
+            if skip_breakpoint {
+                skip_breakpoint = false;
+                return false;
+            }
+
+            breakpoints.contains(pc)
+        });
 
         self.steps = self.steps.saturating_add(result.steps);
+
+        match result.reason {
+            StopReason::Breakpoint { address } => {
+                self.last_breakpoint = Some(address);
+            }
+
+            _ if result.steps > 0 => {
+                self.last_breakpoint = None;
+            }
+
+            _ => {}
+        }
 
         result
     }
@@ -132,5 +166,31 @@ impl DebuggerSession {
         self.memory.clone_from(&self.initial_memory);
 
         self.steps = 0;
+        self.last_breakpoint = None;
+    }
+
+    pub fn add_breakpoint(&mut self, address: u32) -> Result<bool, String> {
+        self.breakpoints.add(address)
+    }
+
+    pub fn remove_breakpoint(&mut self, address: u32) -> bool {
+        if self.last_breakpoint == Some(address) {
+            self.last_breakpoint = None;
+        }
+
+        self.breakpoints.remove(address)
+    }
+
+    pub fn has_breakpoint(&self, address: u32) -> bool {
+        self.breakpoints.contains(address)
+    }
+
+    pub fn breakpoints(&self) -> &Breakpoints {
+        &self.breakpoints
+    }
+
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints.clear();
+        self.last_breakpoint = None;
     }
 }
