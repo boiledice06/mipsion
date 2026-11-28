@@ -2,6 +2,7 @@ mod cli;
 mod control_flow;
 mod cp0;
 mod cp1;
+mod debugger;
 mod decoder;
 mod disassembler;
 mod elf;
