@@ -6,6 +6,7 @@ pub mod cpu;
 pub mod isa;
 pub mod loader;
 pub mod memory;
+pub mod pipeline;
 pub mod runtime;
 
 pub mod debugger;

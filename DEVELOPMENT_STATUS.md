@@ -60,3 +60,9 @@ https://personal.denison.edu/~bressoud/cs281-s10/Supplements/ISA_Vol_2.pdf
 - Batch 64: `1ec755572f84aa11063b63ffbc90fef348b7d014`
 - Batch 65: `bf3066f6a7be66b9c215e5109d95b468709762c7`
 - Batch 66: `cea0af5b1ef7c3a1612cb906f931141241de4909`
+
+## v0.7.0 development
+
+The v0.6.0 annotated tag and published release were verified at `ca836f1548688459c5a81fedc747ebd8bb60f39e`. [Milestone 1](https://github.com/boiledice06/mipsion/milestone/1) closed with three completed issues.
+
+- Batch 67 ([#4](https://github.com/boiledice06/mipsion/issues/4)) implemented separate stage latches, in-order integer ALU and memory operations, conservative RAW stalls, and retirement. All 655 tests and the batch gate passed. Control transfers are part of Batch 68.
