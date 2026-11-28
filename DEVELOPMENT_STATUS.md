@@ -52,3 +52,4 @@ https://personal.denison.edu/~bressoud/cs281-s10/Supplements/ISA_Vol_2.pdf
 ## Validated batches
 
 - Batch 64 ([#1](https://github.com/boiledice06/mipsion/issues/1)) added source parsing and located diagnostics. All 641 tests passed (615 internal, 10 CLI and 16 debugger). Formatting, Clippy and Git whitespace checks passed. Instruction encoding and public assembly are part of Batch 65.
+- Batch 65 ([#2](https://github.com/boiledice06/mipsion/issues/2)) added two-pass layout, text and data, directives and table-driven encoding for all 200 definitions with functional execution paths. The six new tests cover encoding vectors, boundaries, symbol resolution and canonical round trips. The raw image carries no relocations or object metadata.

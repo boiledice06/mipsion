@@ -7,6 +7,8 @@ fn main() {
     let mut operations =
         String::from("#[allow(clippy::upper_case_acronyms)]\npub enum Operation {\n");
     let mut instructions = String::from("pub static INSTRUCTIONS: &[InstructionDef] = &[\n");
+    let mut assembly_formats =
+        String::from("pub(super) static ASSEMBLY_FORMATS: &[(&str, &str)] = &[\n");
     let mut mnemonics = HashSet::new();
     let mut encodings = Vec::<(u32, u32, &str)>::new();
 
@@ -21,7 +23,7 @@ fn main() {
             funct,
             mask,
             pattern,
-            _,
+            operands,
             _,
             _,
             _,
@@ -42,6 +44,15 @@ fn main() {
             assert_eq!(pattern & 0x3f, parse_hex(funct), "{mnemonic}");
         }
 
+        if matches!(*implementation, "구현" | "부분") {
+            writeln!(
+                assembly_formats,
+                "    ({:?}, {:?}),",
+                mnemonic.to_ascii_lowercase(),
+                operands.trim_matches('`')
+            )
+            .unwrap();
+        }
         match *implementation {
             "구현" | "부분" | "대기" => encodings.push((mask, pattern, mnemonic)),
             "별칭" => {}
@@ -76,7 +87,9 @@ fn main() {
     operations.push_str("}\n");
     instructions.push_str("];\n");
 
+    assembly_formats.push_str("];\n");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    fs::write(out_dir.join("assembly_formats.rs"), assembly_formats).unwrap();
     fs::write(out_dir.join("operations.rs"), operations).unwrap();
     fs::write(out_dir.join("instructions.rs"), instructions).unwrap();
 }
