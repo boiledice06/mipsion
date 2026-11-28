@@ -102,11 +102,6 @@ with warnings denied, the optimized build, CLI smoke tests, `cargo tree`
 and Git whitespace checks. The test groups had zero failures and zero
 ignored tests. ISA execution counts still describe the functional engine.
 
-For v0.9.0 work, start from the annotated `v0.8.0` tag, run both test
-configurations, and build against `pipeline::CycleEvent`,
-`pipeline::PipelineStatistics` and the read-only cache inspection API.
-The README documents model limits and the trace semantics.
-
 ## v0.8.1 stabilization
 
 The stabilization baseline is the published v0.8.0 merge. Batches 73–78 cover repository and architecture review, assembler encodings, retirement, cache and hazard timing, read-only visualization data, and the audited release. See [AUDIT_REPORT.md](AUDIT_REPORT.md) for severity, reproduction and validation evidence.
@@ -116,30 +111,24 @@ The stabilization baseline is the published v0.8.0 merge. Batches 73–78 cover 
 
 - Batch 75 ([#12](https://github.com/boiledice06/mipsion/issues/12)) corrected interrupt priority over unsupported diagnostics and added four pipeline audit tests. Validation checkpoint is 695 tests per configuration (656 library, 23 CLI and 16 debugger). The seeded checks exercise 512 retired instructions, plus four SYSCALL boundaries. Both debug and release suites and strict Clippy passed on Windows and Debian WSL2.
 
-### Pause checkpoint after Batch 75
-
-User-requested pause on 2026-11-28. Continue on `fix/architecture-audit`.
-The latest validated commit is the Batch 75 commit referencing #12 at
-the tip of the feature branch. Verify the exact revision with
-`git log -1 --format=%H origin/fix/architecture-audit` after fetching.
-
-1. Run `git fetch origin`, switch to `fix/architecture-audit` and run
-   `git pull --ff-only origin fix/architecture-audit`. Confirm the
-   working tree is clean and the feature tip is the Batch 75 commit.
-2. Resume with **Batch 76**, [issue #13](https://github.com/boiledice06/mipsion/issues/13),
-   under the [v0.8.1 milestone](https://github.com/boiledice06/mipsion/milestone/4).
-   Review `src/cache/`, `src/pipeline/timing.rs`, `hazard.rs` and
-   `timing_tests.rs`. Derive independent cycle, simultaneous event and
-   counter expectations, then compare retirement state with caches and
-   forwarding independently enabled, across geometry and latency settings.
-3. Once Batch 76 is validated and pushed, continue with Batch 77
-   [#14](https://github.com/boiledice06/mipsion/issues/14) for read-only
-   visualization state. Batch 78 [#15](https://github.com/boiledice06/mipsion/issues/15)
-   owns the full release gate, metadata, main revalidation, tag and publication.
-
-GitHub `main` is still the v0.8.0 baseline. No v0.8.1 release metadata,
-tag or release has been created. Batches 76–78 remain open.
-
 - Batch 76 ([#13](https://github.com/boiledice06/mipsion/issues/13)) added five cache/hazard audit tests, including independently derived cycle and cache-event counts and a retirement matrix across eight configurations. The suite reached 700 tests (661 library, 23 CLI, 16 debugger).
 
 - Batch 77 ([#14](https://github.com/boiledice06/mipsion/issues/14)) added read-only stage snapshots and observation of ALU outputs, committed effects, CP0 state, memory requests, and cache placement. Six public API tests brought the suite to 706. [Pipeline inspection](docs/PIPELINE_INSPECTION.md)
+
+### v0.8.1 audit commits
+
+| Batch | Issue | Validated commit |
+| --- | --- | --- |
+| 73 | [#10](https://github.com/boiledice06/mipsion/issues/10) | `b36cfad0b648afae2431a656f69b726c7903b18d` |
+| 74 | [#11](https://github.com/boiledice06/mipsion/issues/11) | `b711d64671bce3938cf318bee1fdf299ce0c8119` |
+| 75 | [#12](https://github.com/boiledice06/mipsion/issues/12) | `82cbef1c817713fd89cabd846bbd164e7360aa36` |
+| 76 | [#13](https://github.com/boiledice06/mipsion/issues/13) | `8e599009b03d80d95f8766e8bcf92f3955dfc9e1` |
+| 77 | [#14](https://github.com/boiledice06/mipsion/issues/14) | `b15975df5a651c949f4693315b9746bc7adacfc5` |
+| 78 | [#15](https://github.com/boiledice06/mipsion/issues/15) | Release metadata commit, identified by its Batch 78 commit body |
+
+The v0.8.1 gate covers 706 tests per build on Windows and Debian WSL2.
+See [AUDIT_REPORT.md](AUDIT_REPORT.md) for evidence and remaining model
+boundaries. The [existing milestone](https://github.com/boiledice06/mipsion/milestone/4)
+tracks the v0.8.1 release. The read-only data contract is documented in
+[Pipeline inspection](docs/PIPELINE_INSPECTION.md). This work ends with
+v0.8.1.

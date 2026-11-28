@@ -25,7 +25,7 @@ and [MIPS32 Privileged Resource Architecture, MD00090 revision 2.50](https://cse
 | ID | Severity | Affected files and evidence | Resolution |
 | --- | --- | --- | --- |
 | A01 | High | `src/cpu/executor.rs` reached `todo!` for decoded pending operations. The v0.8.0 optimized CLI exited 101 on `.word 0x42000020` (WAIT). | Batch 73 routes the unsupported fallback to the guest Reserved Instruction exception. Tests cover CLI behavior, guest EPC and delay-slot Cause.BD. [Issue #16](https://github.com/boiledice06/mipsion/issues/16) |
-| A02 | High | `assets/logo-dark.png:Zone.Identifier` prevented a normal Windows checkout. Git rejected that pathname while the ordinary PNG was valid. | Batch 73 removes the tracked metadata, preserves the PNG and adds an asset sidecar ignore rule. A normal Windows branch checkout is checked after commit. |
+| A02 | High | `assets/logo-dark.png:Zone.Identifier` prevented a normal Windows checkout. Git rejected that pathname while the ordinary PNG was valid. | Batch 73 removes the tracked metadata, preserves the PNG and adds an asset sidecar ignore rule. A fresh Windows clone checked out the branch without sparse checkout. |
 | A03 | Medium | `src/main.rs` read files before checking image size. Both raw/ELF and assembly paths could allocate based on arbitrarily large input. | Batch 73 checks filesystem size and bounds streaming reads to 256 MiB and 16 MiB respectively. A CLI test rejects a 16 MiB + 1 byte source. |
 | A04 | Low | `src/assembler/tests.rs` failed strict Clippy on Rust 1.100.0 with `chunks_exact_to_as_chunks`. No cross-platform CI was configured. | Batch 73 uses typed four-byte slices with a remainder assertion and adds Windows and Ubuntu CI on Rust 1.91.0. |
 
@@ -186,3 +186,30 @@ stepping, inspection purity and cold reset, instruction sequence and delay
 slots, actual ALU and memory values, cache set/way/tag and LRU invariance,
 self-modifying-code invalidation with a distinct refetch, and overflow
 flushing with no younger or partial committed effects.
+
+## Release validation — Batch 78
+
+The audit resolved two High findings (A01–A02), four Medium findings
+(A03, A05, A06, A08) and two Low findings (A04, A07). The inspection API is
+an Informational finding. No Critical defects or unresolved confirmed
+defects were identified within the stabilization scope.
+
+| Platform | Rust | Library | CLI | Debugger | Observation | Debug total | Release total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Windows x86-64 | 1.91.0 | 661 | 23 | 16 | 6 | 706 | 706 |
+| Debian x86-64 in WSL2 | 1.100.0 | 661 | 23 | 16 | 6 | 706 | 706 |
+
+The gate runs `cargo fmt --all -- --check`, `cargo test -q`,
+`cargo test --release -q`, `cargo clippy --all-targets -- -D warnings`,
+`cargo build --release`, `cargo tree` and `git diff --check`.
+The optimized CLI smoke checks cover little-endian assembly, raw
+functional execution, guest Reserved Instruction, pipeline control flow,
+configured cache and forwarding behavior, and both debugger modes.
+The pipeline reset check verifies restored GPR state, memory and cold-cache
+statistics. Tests on additional architectures are outside this audit.
+
+The functional ISA count stays at 200/291 execution paths. The integer
+pipeline and single-core write-through cache are educational models.
+Hardware control nets, bus transactions, multicore coherence and write-back
+are outside their scope. Optional ISA families, hardware timing,
+and GUI implementation are outside this release.
