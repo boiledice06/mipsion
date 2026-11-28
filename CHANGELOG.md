@@ -2,6 +2,34 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.6.0] - Assembler
+
+### Added
+
+- Two-pass, dependency-free assembly with text and data sections, labels,
+  basic data directives and explicit pseudo-instructions.
+- Table-driven encoding for the 200 entries with functional execution paths,
+  including basic FR=0 FPU and CP0/TLB forms.
+- Source-located errors for invalid operands, unsupported mnemonics and
+  invalid branch or jump addresses.
+- Little-endian raw output via `--assemble` and direct CLI or debugger
+  loading via `--source`.
+- Canonical round trips for the supported ISA forms and end-to-end tests
+  for byte layout, delay-slot execution and debugger loading.
+
+### Validation
+
+- 650 tests in debug and release (621 library, 13 CLI, 16 debugger).
+- Optimized CLI assembly, execution and debugger smoke tests.
+- Formatting, Clippy with warnings denied and Git whitespace checks.
+- Zero external Rust dependencies. Functional ISA counts are unchanged.
+
+### Known limitations
+
+- Flat binary layout with no linking, relocations or macros.
+- Delay slots are explicit. The debugger steps instructions and uses
+  numeric breakpoints.
+
 ## [0.5.0] - Interactive Debugger
 
 ### Added
