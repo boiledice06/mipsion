@@ -94,3 +94,42 @@ SHA-256 `774f97f7bf7e14213f7911064425ce87db9052376c7222e0860f252b583f717a`.
 No GNU executable is needed for the Rust regression suite.
 
 Batch 74 passed 691 tests on Windows, including four new library tests.
+
+## Pipeline retirement audit — Batch 75
+
+| ID | Severity | Evidence and fix |
+| --- | --- | --- |
+| A08 | Medium | The v0.8.0 pipeline reported an unsupported instruction at writeback before testing for an eligible interrupt. With Status=0x8001 and Compare=2, a branch at PC 0 followed by MFC0 in its delay slot stopped at PC 4 instead of delivering the timer interrupt. The fixed pipeline checks the architectural boundary first. It reports Interrupt with EPC 0 and Cause.BD set, and flushes the younger work. |
+
+Run `cargo test -q timer_interrupt_preempts_a_delay_slot_unsupported_by_the_pipeline`.
+The test initializes Count to zero, writes Status and Compare, and checks
+the boundary against the functional CPU. A genuine unsupported diagnostic
+with no competing interrupt remains non-retiring and leaves architectural
+state untouched.
+
+A directed control-flow program checked that a taken branch redirects at
+cycle 3, the branch, its slot, and its first target instruction retire at
+cycles 5, 6 and 7, and SYSCALL takes effect at cycle 8. The test checks the
+skipped store and separately expects architectural CP0 Count to equal 4.
+A functional-to-pipeline handoff after JAL independently checks link
+address 8 and the delay-slot fetch order.
+
+The seeded differential used seeds `1`, `0x243f6a88`, `0xb7e15163`, and
+`0xdeadbeef`. Four 128-instruction programs used defined wrapping integer
+arithmetic, comparisons, variable shifts, aligned stores, loads, sign
+extension and writes to GPR zero. There were 512 successful retirements
+and four terminal exceptions. In addition to comparing the two engines,
+the test computes the expected registers and data words independently
+and checks each retired PC for loss or duplication. Simulated cycle count
+is counted separately from architectural instruction boundaries.
+
+Pipeline audit work in Batch 75 covers the documented uncached, conservative
+pipeline baseline. The cache and forwarding configuration matrix belongs to
+Batch 76.
+
+The new interrupt regression fails on the pre-fix Batch 74 tree. The
+pipeline remains at PC 4 while the functional CPU vectors to
+`0x80000180`. With the fix, all 695 tests passed in both debug and release
+on Windows (Rust 1.91.0) and Debian WSL2 (Rust 1.100.0). Strict Clippy
+passed on both toolchains, along with formatting and Git whitespace
+checks.

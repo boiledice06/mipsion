@@ -370,7 +370,9 @@ impl Pipeline {
         let pc = entry.instruction.pc;
         let word = entry.instruction.word.ok();
         debug_assert_eq!(pc, self.cpu.read_pc());
-        if let Action::Unsupported(mnemonic) = entry.action {
+        if let Action::Unsupported(mnemonic) = entry.action
+            && !self.cpu.interrupt_due_at_next_boundary()
+        {
             self.stopped = true;
             return Writeback::Unsupported {
                 pc,
@@ -442,3 +444,6 @@ mod equivalence_tests;
 
 #[cfg(test)]
 mod timing_tests;
+
+#[cfg(test)]
+mod audit_tests;

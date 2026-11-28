@@ -113,3 +113,29 @@ The stabilization baseline is the published v0.8.0 merge. Batches 73–78 cover 
 
 - Batch 73 ([#10](https://github.com/boiledice06/mipsion/issues/10)) removed tracked Windows metadata, added cross-platform CI, bounded CLI input, and replaced the functional executor host panic with a guest exception.
 - Batch 74 ([#11](https://github.com/boiledice06/mipsion/issues/11)) verified 200/200 independent GNU encoding vectors, diagnosed restricted GPR and FPU selectors, and accepted a UTF-8 BOM. All 691 tests passed.
+
+- Batch 75 ([#12](https://github.com/boiledice06/mipsion/issues/12)) corrected interrupt priority over unsupported diagnostics and added four pipeline audit tests. Validation checkpoint is 695 tests per configuration (656 library, 23 CLI and 16 debugger). The seeded checks exercise 512 retired instructions, plus four SYSCALL boundaries. Both debug and release suites and strict Clippy passed on Windows and Debian WSL2.
+
+### Pause checkpoint after Batch 75
+
+User-requested pause on 2026-11-28. Continue on `fix/architecture-audit`.
+The latest validated commit is the Batch 75 commit referencing #12 at
+the tip of the feature branch. Verify the exact revision with
+`git log -1 --format=%H origin/fix/architecture-audit` after fetching.
+
+1. Run `git fetch origin`, switch to `fix/architecture-audit` and run
+   `git pull --ff-only origin fix/architecture-audit`. Confirm the
+   working tree is clean and the feature tip is the Batch 75 commit.
+2. Resume with **Batch 76**, [issue #13](https://github.com/boiledice06/mipsion/issues/13),
+   under the [v0.8.1 milestone](https://github.com/boiledice06/mipsion/milestone/4).
+   Review `src/cache/`, `src/pipeline/timing.rs`, `hazard.rs` and
+   `timing_tests.rs`. Derive independent cycle, simultaneous event and
+   counter expectations, then compare retirement state with caches and
+   forwarding independently enabled, across geometry and latency settings.
+3. Once Batch 76 is validated and pushed, continue with Batch 77
+   [#14](https://github.com/boiledice06/mipsion/issues/14) for read-only
+   visualization state. Batch 78 [#15](https://github.com/boiledice06/mipsion/issues/15)
+   owns the full release gate, metadata, main revalidation, tag and publication.
+
+GitHub `main` is still the v0.8.0 baseline. No v0.8.1 release metadata,
+tag or release has been created. Batches 76–78 remain open.
