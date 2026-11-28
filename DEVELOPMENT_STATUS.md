@@ -139,3 +139,5 @@ the tip of the feature branch. Verify the exact revision with
 
 GitHub `main` is still the v0.8.0 baseline. No v0.8.1 release metadata,
 tag or release has been created. Batches 76–78 remain open.
+
+- Batch 76 ([#13](https://github.com/boiledice06/mipsion/issues/13)) added five cache/hazard audit tests, including independently derived cycle and cache-event counts and a retirement matrix across eight configurations. The suite reached 700 tests (661 library, 23 CLI, 16 debugger).

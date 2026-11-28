@@ -120,3 +120,55 @@ fn invalidate_and_refill_at_a_partial_memory_tail() {
         (22, AccessResult::Miss { evicted: None })
     );
 }
+
+#[test]
+fn cache_address_decomposition_inverts_at_geometry_boundaries() {
+    for (capacity, line_size, ways) in [
+        (4, 4, 1),
+        (96, 16, 3),
+        (256, 32, 2),
+        (16 * 1024 * 1024, 4096, 16),
+    ] {
+        let config = CacheConfig::new(capacity, line_size, ways).unwrap();
+        for physical in [
+            0,
+            line_size - 1,
+            line_size,
+            capacity - 1,
+            capacity,
+            u32::MAX,
+        ] {
+            let parts = config.address(physical);
+            let line_number = physical / line_size;
+            assert_eq!(parts.set, line_number % config.sets());
+            assert_eq!(parts.tag, line_number / config.sets());
+            assert_eq!(parts.offset, physical % line_size);
+            assert_eq!(config.line_base(parts.tag, parts.set), parts.line_base);
+            assert_eq!(parts.line_base + parts.offset, physical);
+        }
+    }
+}
+
+#[test]
+fn invalid_way_precedes_lru_even_if_its_stamp_is_newer() {
+    let memory = Memory::new(64);
+    let mut cache = Cache::new(CacheConfig::new(24, 8, 3).unwrap());
+    for address in [0, 8, 16] {
+        assert_eq!(
+            cache.access(&memory, address, 1, CacheAccess::Read).1,
+            AccessResult::Miss { evicted: None }
+        );
+    }
+    assert_eq!(cache.invalidate(16), Some(16));
+    assert_eq!(
+        cache.access(&memory, 24, 1, CacheAccess::Read).1,
+        AccessResult::Miss { evicted: None }
+    );
+    assert_eq!(cache.line(0, 2).unwrap().tag, 3);
+    assert_eq!(
+        cache.access(&memory, 32, 1, CacheAccess::Read).1,
+        AccessResult::Miss { evicted: Some(0) }
+    );
+    assert_eq!(cache.stats().evictions, 1);
+    assert_eq!(cache.stats().invalidations, 1);
+}

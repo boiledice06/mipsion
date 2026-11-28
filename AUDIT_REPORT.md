@@ -133,3 +133,42 @@ pipeline remains at PC 4 while the functional CPU vectors to
 on Windows (Rust 1.91.0) and Debian WSL2 (Rust 1.100.0). Strict Clippy
 passed on both toolchains, along with formatting and Git whitespace
 checks.
+
+## Cache and hazard audit — Batch 76
+
+Five additional regression tests cover geometry decomposition at the 32-bit
+address boundary, reuse of an invalid way ahead of LRU, exact split-cache
+counters and simultaneous events, forwarding and branch/store dependencies,
+and cancellation of an outstanding fetch at an exception. No cache or
+hazard correctness defect was reproduced in the audited scope.
+
+The exact schedule uses `lw`, dependent `addu`, `sw`, `lw`, and
+`syscall`. IF begins at cycle 1. Unblocked WB first occurs at cycle 5.
+Without forwarding, the two register dependencies each hold ID for two
+cycles. With forwarding, the load-use dependency holds ID for one cycle.
+With 32-byte I lines and 16-byte D lines, the eight IF requests occupy one
+line and the three D requests occupy one line. Each cold miss adds two
+cycles in this trace. Retirement boundaries were also compared with the
+functional CPU.
+
+| Timing mode | Successful WB cycles | SYSCALL cycle |
+| --- | --- | ---: |
+| Uncached, conservative | 5, 8, 11, 12 | 13 |
+| Uncached, forwarding | 5, 7, 8, 9 | 10 |
+| Cached, conservative | 9, 12, 15, 16 | 17 |
+| Cached, forwarding | 9, 11, 12, 13 | 14 |
+
+Both cached traces independently expect 7 I hits, 1 I miss, 2 D hits,
+1 D miss, and simultaneous hits on two cycles. The branch/store program
+compares seven successful retirements and a precise SYSCALL across eight
+configurations, covering caches disabled, forwarding both ways, direct
+mapping, two and three ways, and miss penalties of 0, 1 and 7 cycles.
+A separate directed fault cancels IF address 4 before acceptance, preserves
+its request statistic, and restarts the next request at the handler.
+
+In the model, a miss started on cycle N with latency L becomes eligible
+on N+L. Request-time fills and counters persist across a canceled IF
+access. Acceptance may wait while D blocks the front end. A D wait holds
+the EX/MEM instruction and prevents younger dispatch; an already-started I
+wait can count down. CPI and IPC use successful retirement and simulated
+cycles, and each is absent when its denominator is zero.
