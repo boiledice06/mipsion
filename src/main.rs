@@ -1,3 +1,4 @@
+use mipsion::pipeline::PipelineOptions;
 use mipsion::{assembler, cli, cpu, elf, inspection, loader, memory, runtime, trace};
 use std::path::Path;
 use std::process::ExitCode;
@@ -29,7 +30,17 @@ fn main() -> ExitCode {
             config,
             source,
             max_cycles,
-        } => run_program(config, source, Some(max_cycles)),
+        } => run_program(
+            config,
+            source,
+            Some((max_cycles, PipelineOptions::default())),
+        ),
+        CliAction::RunTimedPipeline {
+            config,
+            source,
+            max_cycles,
+            options,
+        } => run_program(config, source, Some((max_cycles, options))),
         CliAction::Assemble {
             source,
             output,
@@ -84,7 +95,7 @@ fn write_assembly(source: &Path, output: &Path, load_address: u32) -> Result<(),
 fn run_program(
     config: cli::CliConfig,
     source: bool,
-    cycle_limit: Option<u64>,
+    timing: Option<(u64, PipelineOptions)>,
 ) -> Result<(), String> {
     use cpu::Cpu;
     use loader::load_raw;
@@ -147,8 +158,8 @@ fn run_program(
         println!("Stack:        {:#010X}", cpu.read_reg(29));
     }
 
-    if let Some(max_cycles) = cycle_limit {
-        return run_pipeline(config, cpu, memory, max_cycles);
+    if let Some((max_cycles, options)) = timing {
+        return run_pipeline(config, cpu, memory, max_cycles, options);
     }
     if config.debug {
         use mipsion::debugger::{DebuggerSession, run_repl};
@@ -193,9 +204,10 @@ fn run_pipeline(
     cpu: cpu::Cpu,
     memory: memory::Memory,
     max_cycles: u64,
+    options: PipelineOptions,
 ) -> Result<(), String> {
-    use mipsion::pipeline::{Pipeline, Writeback, format_cycle};
-    let mut pipeline = Pipeline::new(cpu, memory);
+    use mipsion::pipeline::{Pipeline, Writeback, format_cycle, format_statistics};
+    let mut pipeline = Pipeline::with_options(cpu, memory, options);
     if config.debug {
         let stdin = std::io::stdin();
         let stdout = std::io::stdout();
@@ -240,8 +252,7 @@ fn run_pipeline(
     };
     println!();
     println!("Pipeline execution finished");
-    println!("Cycles:       {}", pipeline.cycles());
-    println!("Retired:      {}", pipeline.retired());
+    print!("{}", format_statistics(pipeline.statistics()));
     println!("Final PC:     {:#010X}", pipeline.cpu().read_pc());
     println!("Stop reason:  {reason}");
     print_dumps(&config, pipeline.cpu(), pipeline.memory())

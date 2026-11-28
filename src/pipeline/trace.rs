@@ -1,3 +1,5 @@
+use super::timing::PipelineStatistics;
+use crate::cache::{AccessResult, CacheAccess};
 use crate::exception::Exception;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -11,6 +13,9 @@ pub struct PipelineRegisters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stall {
     RegisterDependency { pc: u32, register: u8 },
+    LoadUse { pc: u32, register: u8 },
+    InstructionMemory { pc: u32 },
+    DataMemory { pc: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +46,36 @@ pub struct Redirect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachePort {
+    Instruction,
+    Data,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheEvent {
+    pub port: CachePort,
+    pub kind: CacheAccess,
+    pub address: u32,
+    pub result: AccessResult,
+    pub latency: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardingSource {
+    ExMem,
+    MemWb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Forwarded {
+    pub pc: u32,
+    pub operand: u8,
+    pub register: u8,
+    pub value: u32,
+    pub source: ForwardingSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CycleEvent {
     pub cycle: u64,
     pub registers: PipelineRegisters,
@@ -48,6 +83,10 @@ pub struct CycleEvent {
     pub writeback: Option<Writeback>,
     pub stall: Option<Stall>,
     pub redirect: Option<Redirect>,
+    pub instruction_cache: Option<CacheEvent>,
+    pub data_cache: Option<CacheEvent>,
+    pub invalidated_instruction_line: Option<u32>,
+    pub forwarded: [Option<Forwarded>; 2],
     pub flushed: bool,
 }
 
@@ -69,8 +108,64 @@ pub fn format_cycle(event: &CycleEvent) -> String {
         address(state.mem_wb),
     );
     if let Some(stall) = event.stall {
-        let Stall::RegisterDependency { pc, register } = stall;
-        let _ = write!(text, " stall {pc:08X} waiting for ${register}");
+        match stall {
+            Stall::RegisterDependency { pc, register } => {
+                let _ = write!(text, " stall {pc:08X} waiting for ${register}");
+            }
+            Stall::LoadUse { pc, register } => {
+                let _ = write!(text, " load-use stall {pc:08X} waiting for ${register}");
+            }
+            Stall::InstructionMemory { pc } => {
+                let _ = write!(text, " I-cache stall {pc:08X}");
+            }
+            Stall::DataMemory { pc } => {
+                let _ = write!(text, " D-cache stall {pc:08X}");
+            }
+        }
+    }
+
+    for access in [event.instruction_cache, event.data_cache]
+        .into_iter()
+        .flatten()
+    {
+        let port = match access.port {
+            CachePort::Instruction => "I-cache",
+            CachePort::Data => "D-cache",
+        };
+        let kind = match access.kind {
+            CacheAccess::Read => "read",
+            CacheAccess::Write => "write",
+        };
+        let address = access.address;
+        match access.result {
+            AccessResult::Hit => {
+                let _ = write!(text, " {port} {kind} hit {address:08X}");
+            }
+            AccessResult::Miss { evicted } => {
+                let _ = write!(
+                    text,
+                    " {port} {kind} miss {address:08X} +{}",
+                    access.latency
+                );
+                if let Some(base) = evicted {
+                    let _ = write!(text, " evict {base:08X}");
+                }
+            }
+        }
+    }
+    if let Some(base) = event.invalidated_instruction_line {
+        let _ = write!(text, " I-cache invalidate {base:08X}");
+    }
+    for operand in event.forwarded.into_iter().flatten() {
+        let source = match operand.source {
+            ForwardingSource::ExMem => "EX/MEM",
+            ForwardingSource::MemWb => "MEM/WB",
+        };
+        let _ = write!(
+            text,
+            " forward {source} ${}={:08X} to operand {}",
+            operand.register, operand.value, operand.operand
+        );
     }
     if let Some(redirect) = event.redirect {
         let _ = write!(
@@ -105,6 +200,39 @@ pub fn format_cycle(event: &CycleEvent) -> String {
             );
         }
         None => {}
+    }
+    text
+}
+
+/// Format cumulative pipeline and cache counters for a terminal.
+pub fn format_statistics(stats: PipelineStatistics) -> String {
+    use std::fmt::Write;
+
+    let rate =
+        |value: Option<f64>| value.map_or_else(|| "n/a".into(), |value| format!("{value:.3}"));
+    let mut text = format!(
+        "Cycles:       {}\nRetired:      {}\nCPI:          {}\nIPC:          {}\n",
+        stats.cycles,
+        stats.retired,
+        rate(stats.cpi()),
+        rate(stats.ipc())
+    );
+    for (name, cache) in [
+        ("I-cache", stats.instruction_cache),
+        ("D-cache", stats.data_cache),
+    ] {
+        if let Some(cache) = cache {
+            let _ = writeln!(
+                text,
+                "{name}: reads={} writes={} hits={} misses={} evictions={} invalidations={}",
+                cache.reads,
+                cache.writes,
+                cache.hits,
+                cache.misses,
+                cache.evictions,
+                cache.invalidations
+            );
+        }
     }
     text
 }

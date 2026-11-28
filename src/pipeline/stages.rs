@@ -2,12 +2,18 @@ use super::control;
 use super::state::{
     Action, Decoded, Effect, Executed, Fault, Instruction, Issued, Prepared, Store, Width,
 };
+use crate::cache::CacheAccess;
 use crate::{
     alu, cpu::Cpu, decoder::decode, exception::Exception, instruction::RawInstruction,
     isa::Operation, memory::Memory, mmu::AccessType,
 };
 
-pub(super) fn fetch(cpu: &Cpu, memory: &Memory, pc: u32) -> Instruction {
+pub(super) fn fetch(
+    cpu: &Cpu,
+    memory: &Memory,
+    pc: u32,
+    read: impl FnOnce(u32) -> u32,
+) -> Instruction {
     let address = cpu.instruction_address(memory, pc).map_err(|exception| {
         let address = (exception != Exception::InstructionBusError).then_some(pc);
         Fault::new(exception, address)
@@ -16,7 +22,7 @@ pub(super) fn fetch(cpu: &Cpu, memory: &Memory, pc: u32) -> Instruction {
         pc,
         physical: address.ok(),
         delay_slot: false,
-        word: address.map(|physical| memory.read_word(physical)),
+        word: address.map(read),
     }
 }
 
@@ -132,7 +138,12 @@ fn execution_effect(decoded: Decoded, a: u32, b: u32) -> Effect {
     Effect::Ready(Action::Write(dest, result))
 }
 
-pub(super) fn memory_stage(executed: Executed, cpu: &Cpu, memory: &Memory) -> Prepared {
+pub(super) fn memory_stage(
+    executed: Executed,
+    cpu: &Cpu,
+    memory: &Memory,
+    mut access: impl FnMut(u32, Width, CacheAccess) -> u32,
+) -> Prepared {
     let action = match executed.effect {
         Effect::Ready(action) => action,
         Effect::Load {
@@ -142,12 +153,11 @@ pub(super) fn memory_stage(executed: Executed, cpu: &Cpu, memory: &Memory) -> Pr
             signed,
         } => match translate(cpu, memory, address, width, AccessType::Load) {
             Ok(physical) => {
+                let raw = access(physical, width, CacheAccess::Read);
                 let value = match (width, signed) {
-                    (Width::Byte, true) => memory.read_byte(physical) as i8 as i32 as u32,
-                    (Width::Byte, false) => u32::from(memory.read_byte(physical)),
-                    (Width::Half, true) => memory.read_halfword(physical) as i16 as i32 as u32,
-                    (Width::Half, false) => u32::from(memory.read_halfword(physical)),
-                    (Width::Word, _) => memory.read_word(physical),
+                    (Width::Byte, true) => raw as i8 as i32 as u32,
+                    (Width::Half, true) => raw as i16 as i32 as u32,
+                    _ => raw,
                 };
                 Action::Write(destination, value)
             }
@@ -155,7 +165,10 @@ pub(super) fn memory_stage(executed: Executed, cpu: &Cpu, memory: &Memory) -> Pr
         },
         Effect::Store(store) => {
             match translate(cpu, memory, store.address, store.width, AccessType::Store) {
-                Ok(address) => Action::Store(Store { address, ..store }),
+                Ok(address) => {
+                    access(address, store.width, CacheAccess::Write);
+                    Action::Store(Store { address, ..store })
+                }
                 Err(fault) => Action::Fault(fault),
             }
         }
@@ -189,6 +202,14 @@ fn translate(
         return Err(Fault::new(Exception::DataBusError, None));
     }
     Ok(physical)
+}
+
+pub(super) fn read_memory(memory: &Memory, address: u32, width: Width) -> u32 {
+    match width {
+        Width::Byte => u32::from(memory.read_byte(address)),
+        Width::Half => u32::from(memory.read_halfword(address)),
+        Width::Word => memory.read_word(address),
+    }
 }
 
 pub(super) fn write_store(memory: &mut Memory, store: Store) {

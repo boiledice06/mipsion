@@ -3,14 +3,14 @@ use crate::{
     assembler::assemble, cpu::Cpu, exception::Exception, loader::load_raw, memory::Memory,
 };
 
-fn initialize(source: &str, words: usize) -> (Cpu, Memory) {
+pub(super) fn initialize(source: &str, words: usize) -> (Cpu, Memory) {
     let image = assemble(source, 0).unwrap();
     let mut memory = Memory::new(words * 4);
     load_raw(&mut memory, 0, &image.bytes).unwrap();
     (Cpu::new(), memory)
 }
 
-fn compare_at_writeback(pipeline: &Pipeline, reference: &Cpu, memory: &Memory) {
+pub(super) fn compare_at_writeback(pipeline: &Pipeline, reference: &Cpu, memory: &Memory) {
     let cpu = pipeline.cpu();
     for register in 0..32 {
         assert_eq!(

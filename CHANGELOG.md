@@ -2,6 +2,37 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.8.0] - Cache and Hazard Simulation
+
+### Added
+
+- Configurable split instruction/data caches with physical addressing,
+  direct mapping or set associativity, deterministic LRU, and write-through
+  and write-allocate stores.
+- Configurable miss latency with blocking data waits and an independent
+  outstanding instruction request.
+- EX/MEM and MEM/WB forwarding and a load-use interlock.
+- Instruction-line invalidation and in-flight refetch for stores that change
+  code, including physical aliases.
+- Typed cycle, instruction/data cache and forwarding events, and CLI and
+  debugger statistics for cycles, retirements, CPI, and IPC.
+
+### Validation
+
+- 683 tests in debug and release (646 library, 21 CLI, 16 debugger).
+- Release CLI smoke tests for configured caches, tracing, forwarding,
+  statistics, the cycle debugger, and cold-cache reset.
+- Formatting, Clippy with warnings denied, and Git whitespace checks.
+- Zero external Rust dependencies.
+
+### Known limitations
+
+- Timing covers the documented v0.7.0 integer subset and a single core.
+- Timing parameters describe an educational model. Instruction cache
+  counters include access requests that may later be annulled or flushed.
+- Write-back, cache-management instructions, devices, multicore coherence,
+  and hardware-specific cacheability and timing are outside the model.
+
 ## [0.7.0] - Five-stage Pipeline Simulation
 
 ### Added

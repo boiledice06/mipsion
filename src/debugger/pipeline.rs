@@ -1,5 +1,5 @@
 use crate::cli::{parse_address, parse_number};
-use crate::pipeline::{Pipeline, Writeback, format_cycle};
+use crate::pipeline::{Pipeline, Writeback, format_cycle, format_statistics};
 use crate::runtime::inspection::{dump_cp0, dump_memory, dump_registers};
 use std::io::{self, BufRead, Write};
 
@@ -7,6 +7,7 @@ const HELP: &str = "cycle [count]  Advance and display pipeline cycles\n\
 regs, cp0      Inspect committed registers\n\
 pc             Inspect committed PC and next PC\n\
 mem addr size  Inspect physical memory\n\
+stats          Display cycle and cache statistics\n\
 reset          Reset CPU, memory and pipeline\n\
 quit           Exit the debugger";
 
@@ -16,6 +17,7 @@ pub fn run_pipeline_repl(
     mut output: impl Write,
     max_cycles: u64,
 ) -> io::Result<()> {
+    let options = pipeline.options();
     let initial_cpu = pipeline.cpu().clone();
     let initial_memory = pipeline.memory().clone();
     writeln!(output, "MIPSion Pipeline Debugger")?;
@@ -53,8 +55,10 @@ pub fn run_pipeline_repl(
                     Err(error) => writeln!(output, "Error: {error}")?,
                 }
             }
+            ["stats"] => write!(output, "{}", format_statistics(pipeline.statistics()))?,
             ["reset"] => {
-                pipeline = Pipeline::new(initial_cpu.clone(), initial_memory.clone());
+                pipeline =
+                    Pipeline::with_options(initial_cpu.clone(), initial_memory.clone(), options);
                 writeln!(output, "Pipeline reset")?;
             }
             ["cycle" | "step" | "s", rest @ ..] if rest.len() <= 1 => {

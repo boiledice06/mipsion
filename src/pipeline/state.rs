@@ -29,6 +29,16 @@ pub(super) enum Action {
     Unsupported(Option<&'static str>),
 }
 
+impl Action {
+    pub fn register_write(self) -> Option<(u8, u32)> {
+        match self {
+            Self::Write(register, value) if register != 0 => Some((register, value)),
+            Self::Control { link, .. } => link,
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Store {
     pub address: u32,
@@ -113,12 +123,8 @@ pub(super) enum Effect {
 impl Effect {
     pub fn destination(self) -> Option<u8> {
         match self {
-            Self::Ready(Action::Control { link, .. }) => link.map(|(register, _)| register),
-            Self::Ready(Action::Write(destination, _)) | Self::Load { destination, .. }
-                if destination != 0 =>
-            {
-                Some(destination)
-            }
+            Self::Ready(action) => action.register_write().map(|(register, _)| register),
+            Self::Load { destination, .. } if destination != 0 => Some(destination),
             _ => None,
         }
     }
