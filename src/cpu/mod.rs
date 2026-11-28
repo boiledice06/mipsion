@@ -17,6 +17,7 @@ use crate::exception::Exception;
 
 use crate::mmu::{AccessType, Mmu, TranslationMode};
 
+#[derive(Clone)]
 pub struct Cpu {
     gpr: [u32; 32], // 범용 register 32
     pc: u32,        // Program Counter
