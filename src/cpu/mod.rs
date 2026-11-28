@@ -68,6 +68,15 @@ impl Cpu {
     }
 
     pub fn peek_instruction(&self, memory: &Memory, address: u32) -> Result<u32, Exception> {
+        let physical = self.instruction_address(memory, address)?;
+        Ok(memory.read_word(physical))
+    }
+
+    pub(crate) fn instruction_address(
+        &self,
+        memory: &Memory,
+        address: u32,
+    ) -> Result<u32, Exception> {
         if address & 3 != 0 {
             return Err(Exception::AddressErrorLoad);
         }
@@ -78,7 +87,7 @@ impl Cpu {
             return Err(Exception::InstructionBusError);
         }
 
-        Ok(memory.read_word(physical))
+        Ok(physical)
     }
 
     pub fn fetch(&mut self, memory: &Memory) -> Option<u32> {
@@ -233,6 +242,10 @@ impl Cpu {
 
     pub fn cp1_mut(&mut self) -> &mut Cp1 {
         &mut self.cp1
+    }
+
+    pub(crate) fn next_instruction_is_delay_slot(&self) -> bool {
+        self.next_delay_slot
     }
 
     pub fn mark_delay_slot(&mut self) {

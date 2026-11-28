@@ -66,3 +66,4 @@ https://personal.denison.edu/~bressoud/cs281-s10/Supplements/ISA_Vol_2.pdf
 The v0.6.0 annotated tag and published release were verified at `ca836f1548688459c5a81fedc747ebd8bb60f39e`. [Milestone 1](https://github.com/boiledice06/mipsion/milestone/1) closed with three completed issues.
 
 - Batch 67 ([#4](https://github.com/boiledice06/mipsion/issues/4)) implemented separate stage latches, in-order integer ALU and memory operations, conservative RAW stalls, and retirement. All 655 tests and the batch gate passed. Control transfers are part of Batch 68.
+- Batch 68 ([#5](https://github.com/boiledice06/mipsion/issues/5)) resolved integer branches and jumps, including branch-likely annulment, at EX. Delay-slot faults, architectural retirement and self-modifying code were checked against the functional CPU. All 663 tests and the batch gate passed. Unsupported instructions stop at WB with a diagnostic.

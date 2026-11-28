@@ -33,11 +33,20 @@ pub enum Writeback {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Redirect {
+    pub branch_pc: u32,
+    pub delay_slot: Option<u32>,
+    pub target: u32,
+    pub taken: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CycleEvent {
     pub cycle: u64,
     pub registers: PipelineRegisters,
     pub fetched: Option<u32>,
     pub writeback: Option<Writeback>,
     pub stall: Option<Stall>,
+    pub redirect: Option<Redirect>,
     pub flushed: bool,
 }

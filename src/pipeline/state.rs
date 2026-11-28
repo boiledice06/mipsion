@@ -1,3 +1,4 @@
+use super::trace::Redirect;
 use crate::exception::Exception;
 use crate::isa::Operation;
 
@@ -20,6 +21,10 @@ impl Fault {
 pub(super) enum Action {
     Write(u8, u32),
     Store(Store),
+    Control {
+        redirect: Redirect,
+        link: Option<(u8, u32)>,
+    },
     Fault(Fault),
     Unsupported(Option<&'static str>),
 }
@@ -51,6 +56,8 @@ impl Width {
 #[derive(Clone, Copy)]
 pub(super) struct Instruction {
     pub pc: u32,
+    pub physical: Option<u32>,
+    pub delay_slot: bool,
     pub word: Result<u32, Fault>,
 }
 
@@ -58,6 +65,7 @@ pub(super) struct Instruction {
 pub(super) struct Decoded {
     pub instruction: Instruction,
     pub operation: &'static Operation,
+    pub control: bool,
     pub sources: [Option<u8>; 2],
     pub destination: Option<u8>,
 }
@@ -105,6 +113,7 @@ pub(super) enum Effect {
 impl Effect {
     pub fn destination(self) -> Option<u8> {
         match self {
+            Self::Ready(Action::Control { link, .. }) => link.map(|(register, _)| register),
             Self::Ready(Action::Write(destination, _)) | Self::Load { destination, .. }
                 if destination != 0 =>
             {

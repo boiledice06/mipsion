@@ -1,3 +1,4 @@
+use super::control;
 use super::state::{
     Action, Decoded, Effect, Executed, Fault, Instruction, Issued, Prepared, Store, Width,
 };
@@ -7,11 +8,16 @@ use crate::{
 };
 
 pub(super) fn fetch(cpu: &Cpu, memory: &Memory, pc: u32) -> Instruction {
-    let word = cpu.peek_instruction(memory, pc).map_err(|exception| {
+    let address = cpu.instruction_address(memory, pc).map_err(|exception| {
         let address = (exception != Exception::InstructionBusError).then_some(pc);
         Fault::new(exception, address)
     });
-    Instruction { pc, word }
+    Instruction {
+        pc,
+        physical: address.ok(),
+        delay_slot: false,
+        word: address.map(|physical| memory.read_word(physical)),
+    }
 }
 
 pub(super) fn decode_stage(instruction: Instruction) -> Result<Decoded, Action> {
@@ -28,21 +34,30 @@ pub(super) fn decode_stage(instruction: Instruction) -> Result<Decoded, Action> 
     let rs = Some(raw.rs());
     let rt = Some(raw.rt());
     let rd = Some(raw.rd());
-    let (sources, destination) = match operation {
-        Add | Addu | Sub | Subu | And | Or | Xor | Nor | Slt | Sltu | Mul => ([rs, rt], rd),
-        Addi | Addiu | Andi | Ori | Xori | Slti | Sltiu => ([rs, None], rt),
-        Sll | Sra | Srl | Rotr => ([rt, None], rd),
-        Sllv | Srav | Srlv | Rotrv => ([rt, rs], rd),
-        Lui => ([None, None], rt),
-        Lb | Lbu | Lh | Lhu | Lw => ([rs, None], rt),
-        Sb | Sh | Sw => ([rs, rt], None),
-        Syscall => return Err(Action::Fault(Fault::new(Exception::Syscall, None))),
-        Break => return Err(Action::Fault(Fault::new(Exception::Breakpoint, None))),
-        _ => return Err(Action::Unsupported(Some(definition.mnemonic))),
+    let control_operands = control::source_registers(operation, &raw);
+    if control_operands.is_some() && instruction.delay_slot {
+        return Err(Action::Unsupported(Some(definition.mnemonic)));
+    }
+    let (sources, destination) = if let Some(operands) = control_operands {
+        operands
+    } else {
+        match operation {
+            Add | Addu | Sub | Subu | And | Or | Xor | Nor | Slt | Sltu | Mul => ([rs, rt], rd),
+            Addi | Addiu | Andi | Ori | Xori | Slti | Sltiu => ([rs, None], rt),
+            Sll | Sra | Srl | Rotr => ([rt, None], rd),
+            Sllv | Srav | Srlv | Rotrv => ([rt, rs], rd),
+            Lui => ([None, None], rt),
+            Lb | Lbu | Lh | Lhu | Lw => ([rs, None], rt),
+            Sb | Sh | Sw => ([rs, rt], None),
+            Syscall => return Err(Action::Fault(Fault::new(Exception::Syscall, None))),
+            Break => return Err(Action::Fault(Fault::new(Exception::Breakpoint, None))),
+            _ => return Err(Action::Unsupported(Some(definition.mnemonic))),
+        }
     };
     Ok(Decoded {
         instruction,
         operation,
+        control: control_operands.is_some(),
         sources: sources.map(|source| source.filter(|&reg| reg != 0)),
         destination: destination.filter(|&reg| reg != 0),
     })
@@ -63,6 +78,13 @@ pub(super) fn execute(issued: Issued) -> Executed {
 fn execution_effect(decoded: Decoded, a: u32, b: u32) -> Effect {
     use Operation::*;
     let raw = RawInstruction::new(decoded.instruction.word.unwrap());
+    if decoded.control {
+        let redirect = control::resolve(decoded, a, b, &raw);
+        let link = decoded
+            .destination
+            .map(|register| (register, decoded.instruction.pc.wrapping_add(8)));
+        return Effect::Ready(Action::Control { redirect, link });
+    }
     let signed = raw.immediate() as i16 as i32 as u32;
     let dest = decoded.destination.unwrap_or(0);
     let op = decoded.operation;
