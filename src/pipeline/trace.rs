@@ -1,3 +1,4 @@
+use crate::cache::{AccessResult, CacheAccess};
 use crate::exception::Exception;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -11,6 +12,9 @@ pub struct PipelineRegisters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stall {
     RegisterDependency { pc: u32, register: u8 },
+    LoadUse { pc: u32, register: u8 },
+    InstructionMemory { pc: u32 },
+    DataMemory { pc: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +45,36 @@ pub struct Redirect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachePort {
+    Instruction,
+    Data,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheEvent {
+    pub port: CachePort,
+    pub kind: CacheAccess,
+    pub address: u32,
+    pub result: AccessResult,
+    pub latency: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardingSource {
+    ExMem,
+    MemWb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Forwarded {
+    pub pc: u32,
+    pub operand: u8,
+    pub register: u8,
+    pub value: u32,
+    pub source: ForwardingSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CycleEvent {
     pub cycle: u64,
     pub registers: PipelineRegisters,
@@ -48,6 +82,10 @@ pub struct CycleEvent {
     pub writeback: Option<Writeback>,
     pub stall: Option<Stall>,
     pub redirect: Option<Redirect>,
+    pub instruction_cache: Option<CacheEvent>,
+    pub data_cache: Option<CacheEvent>,
+    pub invalidated_instruction_line: Option<u32>,
+    pub forwarded: [Option<Forwarded>; 2],
     pub flushed: bool,
 }
 
@@ -69,8 +107,20 @@ pub fn format_cycle(event: &CycleEvent) -> String {
         address(state.mem_wb),
     );
     if let Some(stall) = event.stall {
-        let Stall::RegisterDependency { pc, register } = stall;
-        let _ = write!(text, " stall {pc:08X} waiting for ${register}");
+        match stall {
+            Stall::RegisterDependency { pc, register } => {
+                let _ = write!(text, " stall {pc:08X} waiting for ${register}");
+            }
+            Stall::LoadUse { pc, register } => {
+                let _ = write!(text, " load-use stall {pc:08X} waiting for ${register}");
+            }
+            Stall::InstructionMemory { pc } => {
+                let _ = write!(text, " I-cache stall {pc:08X}");
+            }
+            Stall::DataMemory { pc } => {
+                let _ = write!(text, " D-cache stall {pc:08X}");
+            }
+        }
     }
     if let Some(redirect) = event.redirect {
         let _ = write!(

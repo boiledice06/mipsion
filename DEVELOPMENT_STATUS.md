@@ -80,3 +80,4 @@ The v0.6.0 annotated tag and published release were verified at `ca836f154868845
 The v0.7.0 annotated tag and published release were verified at `9421765d8893a2752f6a4e791c8abc0936a0c8d6`. [Milestone 2](https://github.com/boiledice06/mipsion/milestone/2) closed with three completed issues.
 
 - Batch 70 ([#7](https://github.com/boiledice06/mipsion/issues/7)) added validated cache geometry, deterministic LRU, cache line state, physical address decomposition and write-through statistics. All 672 tests and the batch gate passed. The write-through model keeps lines clean.
+- Batch 71 ([#8](https://github.com/boiledice06/mipsion/issues/8)) integrated I/D wait states, write-through coherence across physical aliases, register forwarding and the load-use interlock. All 679 tests and the batch gate passed. Differential tests include cache misses, simultaneous producer age selection, branch annulment and precise delay-slot faults.
