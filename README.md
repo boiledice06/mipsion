@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.8.0 — Cache and Hazard Simulation
+v0.8.1 — Architecture Audit & Stabilization
 
 | Metric | Status |
 | --- | ---: |
@@ -32,10 +32,11 @@ v0.8.0 — Cache and Hazard Simulation
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Internal regression tests | 646 / 646 passing |
+| Internal regression tests | 661 / 661 passing |
 | REPL integration tests | 16 / 16 passing |
-| CLI end-to-end tests | 21 / 21 passing |
-| Total tests | 683 / 683 passing |
+| CLI end-to-end tests | 23 / 23 passing |
+| Observation API integration tests | 6 / 6 passing |
+| Total tests | 706 / 706 passing |
 | External Rust dependencies | 0 |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Test results reflect verified local debug and release builds, not exhaustive ISA conformance or code coverage.
@@ -151,7 +152,7 @@ integration tests for the public debugger API and executable CLI.
 
 ## Getting Started
 
-Requires a Rust toolchain with Cargo.
+Requires Rust and Cargo. CI uses Rust 1.91.0. Normal Windows checkouts are supported. The CLI limits assembly source files to 16 MiB and raw or ELF files to 256 MiB.
 
 ```sh
 cargo build
@@ -374,6 +375,11 @@ divided by retirements, and IPC is retirements divided by cycles. An
 absent denominator is printed as `n/a`. The debugger's `stats` command
 shows the same counters. Reset restores the initial machine state and
 starts with cold caches, preserving the configured geometry and latency.
+
+The read-only pipeline and cache inspection API is described in
+[Pipeline inspection](docs/PIPELINE_INSPECTION.md). The architecture audit
+records verified fixes, timing conventions and known boundaries.
+[Architecture audit](AUDIT_REPORT.md)
 
 ## Current Limitations
 

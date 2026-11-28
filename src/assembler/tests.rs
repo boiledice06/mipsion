@@ -4,12 +4,10 @@ use crate::isa::disassembler::disassemble;
 use crate::isa::mips32r2::INSTRUCTIONS;
 
 fn words(source: &str, pc: u32) -> Vec<u32> {
-    assemble(source, pc)
-        .unwrap()
-        .bytes
-        .chunks_exact(4)
-        .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
-        .collect()
+    let assembly = assemble(source, pc).unwrap();
+    let (words, remainder) = assembly.bytes.as_chunks::<4>();
+    assert!(remainder.is_empty());
+    words.iter().copied().map(u32::from_le_bytes).collect()
 }
 
 #[test]
@@ -39,8 +37,14 @@ fn all_execution_path_definitions_have_canonical_assembly() {
             .iter()
             .find(|entry| entry.mnemonic == mnemonic)
             .unwrap();
-        // Zero operands in the ISA patterns give valid pairs and aligned targets.
-        let source = disassemble(definition.pattern, 0);
+        // Select architecturally valid operands where zero is restricted.
+        let representative = definition.pattern
+            | match mnemonic {
+                "jalr" | "jalr.hb" => 9 << 21,
+                "ctc1" => 31 << 11,
+                _ => 0,
+            };
+        let source = disassemble(representative, 0);
         assert!(
             !source.starts_with(".word"),
             "missing canonical form for {mnemonic}"
@@ -131,4 +135,100 @@ fn branch_and_jump_handle_pc_plus_four_boundaries() {
         ErrorKind::Layout
     );
     assert_eq!(assemble("nop", 1).unwrap_err().kind, ErrorKind::Misaligned);
+}
+
+#[test]
+fn all_200_forms_match_independent_gnu_words() {
+    use super::encoder::ASSEMBLY_FORMATS;
+    use std::collections::BTreeSet;
+    let mut source = String::from(".text\n");
+    let mut expected = Vec::new();
+    let mut names = BTreeSet::new();
+    for line in include_str!("../../tests/fixtures/gnu-mips32r2.tsv")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+    {
+        let (word, statement) = line.split_once('\t').unwrap();
+        assert!(
+            names.insert(statement.split_whitespace().next().unwrap()),
+            "{statement}"
+        );
+        expected.push((u32::from_str_radix(word, 16).unwrap(), statement));
+        source.push_str(statement);
+        source.push('\n');
+    }
+    assert_eq!(
+        names,
+        ASSEMBLY_FORMATS.iter().map(|&(name, _)| name).collect()
+    );
+    assert_eq!(names.len(), 200);
+    source.push_str("target:\n");
+    let actual = words(&source, 0);
+    assert_eq!(actual.len(), expected.len());
+    for (actual, (expected, statement)) in actual.into_iter().zip(expected) {
+        assert_eq!(actual, expected, "{statement}");
+    }
+}
+
+#[test]
+fn rejects_unpredictable_link_registers_and_unavailable_fpu_control_registers() {
+    for source in [
+        "jalr $t0, $t0",
+        "jalr $ra",
+        "jalr.hb $31, $ra",
+        "bgezal $31, 4",
+        "bgezall $ra, 4",
+        "bltzal $ra, 4",
+        "bltzall $31, 4",
+        "cfc1 $t0, $1",
+        "ctc1 $t0, $0",
+        "ctc1 $t0, $27",
+    ] {
+        let error = assemble(source, 0).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidOperand, "{source}");
+        assert_eq!(error.location.line, 1);
+    }
+    assert_eq!(
+        words("jalr $t0\ncfc1 $t0, $0\nctc1 $t0, $31", 0),
+        [0x0100_f809, 0x4448_0000, 0x44c8_f800]
+    );
+}
+
+#[test]
+fn windows_utf8_bom_and_crlf_keep_source_locations() {
+    assert_eq!(words("\u{feff}.text\r\nnop\r\n", 0), [0]);
+    let error = assemble("\u{feff}  addiu $t0, $zero, 32768\r\n", 0).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::OutOfRange);
+    assert_eq!(
+        error.location,
+        super::SourceLocation {
+            line: 1,
+            column: 21
+        }
+    );
+}
+
+#[test]
+fn immediate_edges_and_final_word_at_top_of_address_space() {
+    assert_eq!(
+        words(
+            "addiu $t0, $t1, -32768\naddiu $t0, $t1, 32767\nori $t0, $t1, 65535\nins $t0, $t1, 31, 1",
+            0
+        ),
+        [0x2528_8000, 0x2528_7fff, 0x3528_ffff, 0x7d28_ffc4]
+    );
+    assert_eq!(
+        words(".word -2147483648, 0xffffffff", 0),
+        [0x8000_0000, 0xffff_ffff]
+    );
+    assert_eq!(words("nop", 0xffff_fffc), [0]);
+    for source in [
+        "addiu $t0, $t0, -32769",
+        "ori $t0, $t0, 65536",
+        ".word 0x100000000",
+        "bc1t $fcc8, 0",
+        "mfc0 $t0, $12, 8",
+    ] {
+        assert_eq!(assemble(source, 0).unwrap_err().kind, ErrorKind::OutOfRange);
+    }
 }

@@ -2,6 +2,43 @@
 
 All notable changes to MIPSion are documented here.
 
+## [0.8.1] - Architecture Audit & Stabilization
+
+### Fixed
+
+- Replaced a functional executor host panic on unsupported decoded
+  instructions with guest Reserved Instruction delivery.
+- Restored normal Windows checkouts by removing a tracked NTFS metadata
+  path. CI now validates Windows and Ubuntu.
+- Bounded CLI input reads to 16 MiB for assembly source and 256 MiB for
+  raw binaries or ELF files.
+- Diagnosed unpredictable branch-and-link and JALR register combinations
+  and unavailable basic FPU control selectors. Accepted a leading
+  UTF-8 BOM in assembly source.
+- Gave eligible timer interrupts priority over unsupported pipeline
+  diagnostics at the architectural boundary.
+
+### Added
+
+- Independent GNU binutils words for one representative of each of the
+  200 supported assembler forms.
+- Seeded retirement comparisons, independent cycle schedules and
+  cache/hazard differential validation across eight configurations.
+- Read-only pipeline snapshots and observed cycles exposing dynamic
+  instruction identity, ALU values, committed writes, memory requests,
+  CP0 state and cache placement.
+
+### Validation
+
+- 706 tests per build on Windows and Debian WSL2 in debug and release.
+- Formatting, Clippy with denied warnings, optimized builds, dependency
+  checks and CLI smoke tests on both platforms.
+- Zero external Rust dependencies. Functional ISA coverage remains
+  200 of 291 execution paths.
+
+See [AUDIT_REPORT.md](AUDIT_REPORT.md) for confirmed findings and reproduction
+and [Pipeline inspection](docs/PIPELINE_INSPECTION.md) for the API.
+
 ## [0.8.0] - Cache and Hazard Simulation
 
 ### Added

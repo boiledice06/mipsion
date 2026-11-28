@@ -1,3 +1,4 @@
+use super::observation::AluSnapshot;
 use super::trace::Redirect;
 use crate::exception::Exception;
 use crate::isa::Operation;
@@ -65,6 +66,7 @@ impl Width {
 
 #[derive(Clone, Copy)]
 pub(super) struct Instruction {
+    pub sequence: u64,
     pub pc: u32,
     pub physical: Option<u32>,
     pub delay_slot: bool,
@@ -106,6 +108,7 @@ impl Issued {
 pub(super) struct Executed {
     pub instruction: Instruction,
     pub effect: Effect,
+    pub alu: Option<AluSnapshot>,
 }
 
 #[derive(Clone, Copy)]

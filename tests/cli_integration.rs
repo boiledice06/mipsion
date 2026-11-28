@@ -446,3 +446,30 @@ fn cli_forwarding_without_caches_reduces_cycles_at_equal_retirements() {
     assert!(cycles(&forwarded) < cycles(&plain));
     assert!(!forwarded.contains("I-cache:"));
 }
+
+#[test]
+fn cli_reports_a_guest_reserved_instruction_for_pending_wait() {
+    let output = execute(
+        &[
+            "--source",
+            "tests/fixtures/unsupported-functional.s",
+            "--max-steps",
+            "1",
+        ],
+        "",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("Exception { code: 10, epc: 0, in_delay_slot: false }"));
+}
+
+#[test]
+fn cli_rejects_oversize_source_before_parsing_or_loading() {
+    let path = std::env::temp_dir().join(format!("mipsion-large-source-{}.s", std::process::id()));
+    let file = std::fs::File::create_new(&path).unwrap();
+    file.set_len(16 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let output = execute(&["--source", path.to_str().unwrap()], "");
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("input exceeds 16 MiB limit"));
+}

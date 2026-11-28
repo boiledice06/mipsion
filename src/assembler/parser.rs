@@ -29,6 +29,8 @@ pub(super) fn symbol(value: &str) -> bool {
 
 pub(super) fn parse(source: &str) -> Result<Vec<Line<'_>>, Diagnostic> {
     source
+        .strip_prefix('\u{feff}')
+        .unwrap_or(source)
         .lines()
         .enumerate()
         .map(|(index, line)| parse_line(line, index + 1))

@@ -2,11 +2,17 @@
 
 mod control;
 mod hazard;
+mod observation;
 mod stages;
 mod state;
 mod timing;
 mod trace;
 
+pub use observation::{
+    AluSnapshot, CommittedWrite, Cp0Snapshot, CycleObservation, DecodedInputs, ExecuteSnapshot,
+    FaultSnapshot, InstructionSnapshot, IssuedSnapshot, MemoryRequest, PendingSnapshot,
+    PipelineSnapshot, PreparedSnapshot, StageAddress, StageEffect,
+};
 pub use timing::{CacheModelConfig, PipelineOptions, PipelineStatistics};
 pub use trace::{
     CacheEvent, CachePort, CycleEvent, Forwarded, ForwardingSource, PipelineRegisters, Redirect,
@@ -18,6 +24,7 @@ use crate::{
     cpu::Cpu,
     memory::Memory,
 };
+use observation::CycleDetails;
 use stages::{decode_stage, execute, fetch, memory_stage, read_memory, write_store};
 use state::{Action, Effect, Executed, Instruction, Issued, Prepared, Store};
 use timing::{CacheTiming, Pending};
@@ -32,6 +39,7 @@ pub struct Pipeline {
     ex_mem: Option<Executed>,
     mem_wb: Option<Prepared>,
     fetch_pc: u32,
+    next_fetch_sequence: u64,
     after_delay_slot: Option<u32>,
     fetch_enabled: bool,
     stopped: bool,
@@ -61,6 +69,7 @@ impl Pipeline {
             ex_mem: None,
             mem_wb: None,
             fetch_pc,
+            next_fetch_sequence: 1,
             after_delay_slot,
             fetch_enabled: true,
             stopped: false,
@@ -130,9 +139,67 @@ impl Pipeline {
             && self.pending_memory.is_none()
     }
 
+    /// Inspect the current state without advancing time or touching the caches.
+    pub fn snapshot(&self) -> PipelineSnapshot {
+        let cp0 = self.cpu.cp0();
+        PipelineSnapshot {
+            statistics: self.statistics(),
+            architectural_pc: self.cpu.read_pc(),
+            architectural_next_pc: self.cpu.read_next_pc(),
+            cp0: Cp0Snapshot {
+                status: cp0.read_status(),
+                cause: cp0.read_cause(),
+                epc: cp0.read_epc(),
+                bad_vaddr: cp0.read_bad_vaddr(),
+                count: cp0.read_count(),
+            },
+            fetch_pc: self.fetch_pc,
+            fetch_enabled: self.fetch_enabled,
+            target_after_delay_slot: self.after_delay_slot,
+            stopped: self.stopped || self.cpu.is_halted(),
+            if_id: self.if_id.map(InstructionSnapshot::from),
+            id_ex: self.id_ex.map(IssuedSnapshot::from),
+            ex_mem: self.ex_mem.map(ExecuteSnapshot::from),
+            mem_wb: self.mem_wb.map(PreparedSnapshot::from),
+            pending_fetch: self.pending_fetch.map(|pending| PendingSnapshot {
+                entry: pending.payload.into(),
+                cycles_remaining: pending.remaining,
+            }),
+            pending_memory: self.pending_memory.map(|pending| PendingSnapshot {
+                entry: pending.payload.into(),
+                cycles_remaining: pending.remaining,
+            }),
+        }
+    }
+
+    /// Advance one cycle with owned observations of stage activity and effects.
+    pub fn cycle_observed(&mut self) -> Option<CycleObservation> {
+        let mut details = CycleDetails::default();
+        let event = self.cycle_inner(Some(&mut details))?;
+        Some(CycleObservation {
+            snapshot: self.snapshot(),
+            executed: details.executed,
+            writeback_instruction: details.writeback_instruction,
+            committed_write: details.committed_write,
+            memory_request: details.memory_request,
+            instruction_cache_line: event
+                .instruction_cache
+                .and_then(|access| self.instruction_cache()?.resident_line(access.address)),
+            data_cache_line: event
+                .data_cache
+                .and_then(|access| self.data_cache()?.resident_line(access.address)),
+            invalidated_line: details.invalidated_line,
+            event,
+        })
+    }
+
     /// Advance one cycle and report post-cycle latches. An unsupported
     /// instruction stops the model at WB and subsequent calls return None.
     pub fn cycle(&mut self) -> Option<CycleEvent> {
+        self.cycle_inner(None)
+    }
+
+    fn cycle_inner(&mut self, mut details: Option<&mut CycleDetails>) -> Option<CycleEvent> {
         if self.stopped || self.cpu.is_halted() {
             return None;
         }
@@ -151,7 +218,10 @@ impl Pipeline {
             flushed: false,
         };
         if let Some(prepared) = self.mem_wb.take() {
-            let outcome = self.commit(prepared, &mut event);
+            if let Some(details) = details.as_deref_mut() {
+                details.writeback_instruction = Some(prepared.instruction.into());
+            }
+            let outcome = self.commit(prepared, &mut event, details.as_deref_mut());
             event.writeback = Some(outcome);
             let overwrote_code = matches!(prepared.action, Action::Store(store) if self.overwrote_code(store.address));
             if !matches!(outcome, Writeback::Retired { .. }) || overwrote_code {
@@ -172,11 +242,14 @@ impl Pipeline {
             self.id_ex.and_then(Issued::destination),
             self.ex_mem.and_then(|entry| entry.effect.destination()),
         ];
-        if !self.advance_memory(&mut event) {
+        if !self.advance_memory(&mut event, details.as_deref_mut()) {
             event.registers = self.registers();
             return Some(event);
         }
         self.ex_mem = self.id_ex.take().map(execute);
+        if let Some(details) = details {
+            details.executed = self.ex_mem.map(ExecuteSnapshot::from);
+        }
         if let Some(Executed {
             effect: Effect::Ready(Action::Control { redirect, .. }),
             ..
@@ -215,7 +288,11 @@ impl Pipeline {
         Some(event)
     }
 
-    fn advance_memory(&mut self, event: &mut CycleEvent) -> bool {
+    fn advance_memory(
+        &mut self,
+        event: &mut CycleEvent,
+        mut details: Option<&mut CycleDetails>,
+    ) -> bool {
         let Some(entry) = self.ex_mem else {
             return true;
         };
@@ -230,7 +307,7 @@ impl Pipeline {
             return false;
         }
         let prepared = memory_stage(entry, &self.cpu, &self.memory, |address, width, kind| {
-            if let Some(caches) = &mut self.caches {
+            let value = if let Some(caches) = &mut self.caches {
                 let (value, cache_event) =
                     caches.access(&self.memory, CachePort::Data, kind, address, width.bytes());
                 event.data_cache = Some(cache_event);
@@ -239,7 +316,23 @@ impl Pipeline {
                 read_memory(&self.memory, address, width)
             } else {
                 0
+            };
+            if let Some(details) = details.as_deref_mut() {
+                let virtual_address = match entry.effect {
+                    Effect::Load { address, .. } => address,
+                    Effect::Store(store) => store.address,
+                    Effect::Ready(_) => unreachable!("only memory effects start requests"),
+                };
+                details.memory_request = Some(MemoryRequest {
+                    instruction: entry.instruction.into(),
+                    kind,
+                    virtual_address,
+                    physical_address: address,
+                    bytes: width.bytes(),
+                    read_value: (kind == CacheAccess::Read).then_some(value),
+                });
             }
+            value
         });
         let latency = event.data_cache.map_or(0, |access| access.latency);
         if latency == 0 {
@@ -274,21 +367,29 @@ impl Pipeline {
             return;
         }
 
-        let instruction = fetch(&self.cpu, &self.memory, self.fetch_pc, |address| {
-            if let Some(caches) = &mut self.caches {
-                let (value, cache_event) = caches.access(
-                    &self.memory,
-                    CachePort::Instruction,
-                    CacheAccess::Read,
-                    address,
-                    4,
-                );
-                event.instruction_cache = Some(cache_event);
-                value
-            } else {
-                self.memory.read_word(address)
-            }
-        });
+        let sequence = self.next_fetch_sequence;
+        self.next_fetch_sequence += 1;
+        let instruction = fetch(
+            &self.cpu,
+            &self.memory,
+            self.fetch_pc,
+            sequence,
+            |address| {
+                if let Some(caches) = &mut self.caches {
+                    let (value, cache_event) = caches.access(
+                        &self.memory,
+                        CachePort::Instruction,
+                        CacheAccess::Read,
+                        address,
+                        4,
+                    );
+                    event.instruction_cache = Some(cache_event);
+                    value
+                } else {
+                    self.memory.read_word(address)
+                }
+            },
+        );
         let latency = event.instruction_cache.map_or(0, |access| access.latency);
         if latency == 0 {
             self.accept_fetch(instruction, event);
@@ -366,11 +467,18 @@ impl Pipeline {
         .any(|entry| entry.physical == word)
     }
 
-    fn commit(&mut self, entry: Prepared, event: &mut CycleEvent) -> Writeback {
+    fn commit(
+        &mut self,
+        entry: Prepared,
+        event: &mut CycleEvent,
+        details: Option<&mut CycleDetails>,
+    ) -> Writeback {
         let pc = entry.instruction.pc;
         let word = entry.instruction.word.ok();
         debug_assert_eq!(pc, self.cpu.read_pc());
-        if let Action::Unsupported(mnemonic) = entry.action {
+        if let Action::Unsupported(mnemonic) = entry.action
+            && !self.cpu.interrupt_due_at_next_boundary()
+        {
             self.stopped = true;
             return Writeback::Unsupported {
                 pc,
@@ -384,11 +492,11 @@ impl Pipeline {
             return self.exception_event(pc, crate::exception::Exception::Interrupt);
         };
         match action {
-            Action::Write(register, value) => self.cpu.write_reg(usize::from(register), value),
-            Action::Store(store) => self.commit_store(store, event),
+            Action::Write(register, value) => self.commit_register(register, value, details),
+            Action::Store(store) => self.commit_store(store, event, details),
             Action::Control { redirect, link } => {
                 if let Some((register, value)) = link {
-                    self.cpu.write_reg(usize::from(register), value);
+                    self.commit_register(register, value, details);
                 }
                 if redirect.delay_slot.is_some() {
                     self.cpu.write_next_pc(redirect.target);
@@ -410,7 +518,29 @@ impl Pipeline {
         }
     }
 
-    fn commit_store(&mut self, store: Store, event: &mut CycleEvent) {
+    fn commit_register(&mut self, register: u8, value: u32, details: Option<&mut CycleDetails>) {
+        let details = details.filter(|_| register != 0);
+        let index = usize::from(register);
+        let before = details.as_ref().map(|_| self.cpu.read_reg(index));
+        self.cpu.write_reg(index, value);
+        if let (Some(details), Some(before)) = (details, before) {
+            details.committed_write = Some(CommittedWrite::Register {
+                register,
+                before,
+                after: self.cpu.read_reg(index),
+            });
+        }
+    }
+
+    fn commit_store(
+        &mut self,
+        store: Store,
+        event: &mut CycleEvent,
+        mut details: Option<&mut CycleDetails>,
+    ) {
+        let before = details
+            .as_ref()
+            .map(|_| read_memory(&self.memory, store.address, store.width));
         if let Some(caches) = &mut self.caches {
             let bytes = store.value.to_le_bytes();
             caches.data.write_through(
@@ -418,9 +548,20 @@ impl Pipeline {
                 store.address,
                 &bytes[..store.width.bytes()],
             );
+            if let Some(details) = details.as_deref_mut() {
+                details.invalidated_line = caches.instruction.resident_line(store.address);
+            }
             event.invalidated_instruction_line = caches.instruction.invalidate(store.address);
         } else {
             write_store(&mut self.memory, store);
+        }
+        if let (Some(details), Some(before)) = (details, before) {
+            details.committed_write = Some(CommittedWrite::Memory {
+                physical_address: store.address,
+                bytes: store.width.bytes(),
+                before,
+                after: read_memory(&self.memory, store.address, store.width),
+            });
         }
     }
 
@@ -442,3 +583,6 @@ mod equivalence_tests;
 
 #[cfg(test)]
 mod timing_tests;
+
+#[cfg(test)]
+mod audit_tests;

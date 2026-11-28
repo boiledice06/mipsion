@@ -40,6 +40,16 @@ pub(super) fn emit(
     let rt = |operand| register(operand).map(|reg| reg << 16);
     let rs = |operand| register(operand).map(|reg| reg << 21);
     let rd = |operand| register(operand).map(|reg| reg << 11);
+    let jump_register = |dest, source: &LocatedOperand<'_>| {
+        let source_register = register(source)?;
+        if dest == source_register {
+            return Err(source.0.error(
+                ErrorKind::InvalidOperand,
+                "JALR requires distinct link and target registers",
+            ));
+        }
+        Ok((dest << 11) | (source_register << 21))
+    };
     let value =
         |operand: &LocatedOperand<'_>| address_or_number(operand.0, atom(operand)?, symbols);
     let target = |operand: &LocatedOperand<'_>| {
@@ -160,7 +170,16 @@ pub(super) fn emit(
         ("offset(base)", [address]) => memory(address)?,
         ("hint,offset(base)", [hint, address]) => (numeric(hint, 0, 31)? << 16) | memory(address)?,
         ("rs, rt, offset", [s, t, dest]) => rs(s)? | rt(t)? | branch(dest)?,
-        ("rs, offset", [s, dest]) => rs(s)? | branch(dest)?,
+        ("rs, offset", [s, dest]) => {
+            let register = register(s)?;
+            if register == 31 && matches!(name, "bgezal" | "bgezall" | "bltzal" | "bltzall") {
+                return Err(s.0.error(
+                    ErrorKind::InvalidOperand,
+                    "branch-and-link cannot read the link register $ra",
+                ));
+            }
+            (register << 21) | branch(dest)?
+        }
         ("target", [dest]) => {
             let address = target(dest)?;
             if (address ^ pc.wrapping_add(4)) & 0xf000_0000 != 0 {
@@ -171,8 +190,8 @@ pub(super) fn emit(
             }
             (address >> 2) & 0x03ff_ffff
         }
-        ("[rd,] rs", [s]) => (31 << 11) | rs(s)?,
-        ("[rd,] rs", [d, s]) => rd(d)? | rs(s)?,
+        ("[rd,] rs", [s]) => jump_register(31, s)?,
+        ("[rd,] rs", [d, s]) => jump_register(register(d)?, s)?,
         ("[code]" | "[stype]" | "[rt]", []) => 0,
         ("[code]", [code]) => numeric(code, 0, 0x000f_ffff)? << 6,
         ("[stype]", [stype]) => numeric(stype, 0, 31)? << 6,
@@ -183,7 +202,13 @@ pub(super) fn emit(
         }
         ("rt, fs", [t, s]) => {
             let s = if matches!(name, "cfc1" | "ctc1") {
-                special_number(s, "$", 31)?
+                let index = special_number(s, "$", 31)?;
+                let accessible = matches!(index, 25 | 26 | 28 | 31) || name == "cfc1" && index == 0;
+                if !accessible {
+                    return Err(s.0.error(ErrorKind::InvalidOperand,
+                        format!("{name} cannot access CP1 control register {index} in the basic FPU profile")));
+                }
+                index
             } else {
                 fpr(s, matches!(name, "mfhc1" | "mthc1"))?
             };

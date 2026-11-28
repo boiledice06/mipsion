@@ -3,6 +3,9 @@ use mipsion::{assembler, cli, cpu, elf, inspection, loader, memory, runtime, tra
 use std::path::Path;
 use std::process::ExitCode;
 
+const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_PROGRAM_BYTES: u64 = 256 * 1024 * 1024;
+
 fn main() -> ExitCode {
     use cli::{CliAction, parse_args};
 
@@ -56,9 +59,34 @@ fn main() -> ExitCode {
     }
 }
 
+fn read_input(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let read_error = |error| format!("failed to read {}: {error}", path.display());
+    let limit_error = || {
+        format!(
+            "{}: input exceeds {} MiB limit",
+            path.display(),
+            limit / (1024 * 1024)
+        )
+    };
+    let file = std::fs::File::open(path).map_err(read_error)?;
+    if file.metadata().map_err(read_error)?.len() > limit {
+        return Err(limit_error());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(read_error)?;
+    if bytes.len() as u64 > limit {
+        return Err(limit_error());
+    }
+    Ok(bytes)
+}
+
 fn read_assembly(path: &Path, load_address: u32) -> Result<Vec<u8>, String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let source = String::from_utf8(read_input(path, MAX_SOURCE_BYTES)?)
+        .map_err(|error| format!("failed to read {} as UTF-8: {error}", path.display()))?;
     let mut bytes = assembler::assemble(&source, load_address)
         .map_err(|error| format!("{}:{error}", path.display()))?
         .bytes;
@@ -111,8 +139,7 @@ fn run_program(
     let bytes = if source {
         read_assembly(&config.program, config.load_address)?
     } else {
-        std::fs::read(&config.program)
-            .map_err(|error| format!("failed to read {}: {error}", config.program.display()))?
+        read_input(&config.program, MAX_PROGRAM_BYTES)?
     };
 
     let mut memory = Memory::new(config.memory_size);

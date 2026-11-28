@@ -164,6 +164,14 @@ impl Cpu {
         true
     }
 
+    // A pipeline diagnostic must not consume an architectural step, but an
+    // interrupt (including a timer match on that step) takes priority.
+    pub(crate) fn interrupt_due_at_next_boundary(&self) -> bool {
+        let mut cp0 = self.cp0.clone();
+        cp0.tick();
+        cp0.interrupt_requested()
+    }
+
     // The pipeline has already computed the instruction's effects. CP0 and
     // architectural PC state are updated here in the same order as step().
     pub(crate) fn begin_pipeline_step(&mut self, word: Option<u32>) -> bool {
