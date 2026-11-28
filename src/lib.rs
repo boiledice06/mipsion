@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod assembler;
 pub mod cli;
 pub mod cpu;
 pub mod isa;
