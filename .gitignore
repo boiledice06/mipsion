@@ -2,3 +2,6 @@
 
 # Windows download metadata
 *:Zone.Identifier
+
+# Alternate name used for exported asset metadata
+/assets/*.Zone.Identifier

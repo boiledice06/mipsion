@@ -106,3 +106,9 @@ For v0.9.0 work, start from the annotated `v0.8.0` tag, run both test
 configurations, and build against `pipeline::CycleEvent`,
 `pipeline::PipelineStatistics` and the read-only cache inspection API.
 The README documents model limits and the trace semantics.
+
+## v0.8.1 stabilization
+
+The stabilization baseline is the published v0.8.0 merge. Batches 73–78 cover repository and architecture review, assembler encodings, retirement, cache and hazard timing, read-only visualization data, and the audited release. See [AUDIT_REPORT.md](AUDIT_REPORT.md) for severity, reproduction and validation evidence.
+
+- Batch 73 ([#10](https://github.com/boiledice06/mipsion/issues/10)) removed tracked Windows metadata, added cross-platform CI, bounded CLI input, and replaced the functional executor host panic with a guest exception.

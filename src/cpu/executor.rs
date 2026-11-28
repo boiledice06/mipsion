@@ -1369,10 +1369,7 @@ pub fn execute(cpu: &mut Cpu, memory: &mut Memory, inst: &RawInstruction, operat
         Operation::Tlbp => {
             cpu.cp0_mut().tlb_probe();
         }
-        _ => todo!(
-            "Instruction not implemented: opcode={:#04x}, funct={:#04x}",
-            inst.opcode(),
-            inst.funct()
-        ),
+        // A decoder entry can describe an instruction outside this CPU profile.
+        _ => cpu.raise_exception(Exception::ReservedInstruction, None),
     }
 }

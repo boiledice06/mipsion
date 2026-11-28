@@ -4,12 +4,10 @@ use crate::isa::disassembler::disassemble;
 use crate::isa::mips32r2::INSTRUCTIONS;
 
 fn words(source: &str, pc: u32) -> Vec<u32> {
-    assemble(source, pc)
-        .unwrap()
-        .bytes
-        .chunks_exact(4)
-        .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
-        .collect()
+    let assembly = assemble(source, pc).unwrap();
+    let (words, remainder) = assembly.bytes.as_chunks::<4>();
+    assert!(remainder.is_empty());
+    words.iter().copied().map(u32::from_le_bytes).collect()
 }
 
 #[test]

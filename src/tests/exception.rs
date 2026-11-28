@@ -168,3 +168,20 @@ fn arithmetic_delay_slot_exception() {
     assert_eq!(cpu.cp0().exception_code(), 12);
     assert_eq!(cpu.read_reg(10), 123);
 }
+
+#[test]
+fn decoded_unsupported_wait_raises_reserved_instruction_at_guest_pc() {
+    let cpu = run(&[0x4200_0020], &[]);
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert!(!cpu.cp0().branch_delay());
+    assert_eq!(cpu.read_pc(), 0x8000_0180);
+}
+
+#[test]
+fn decoded_unsupported_wait_in_delay_slot_preserves_branch_epc() {
+    let cpu = run(&[0x1000_0002, 0x4200_0020], &[]);
+    assert_eq!(cpu.cp0().exception_code(), 10);
+    assert_eq!(cpu.cp0().read_epc(), 0);
+    assert!(cpu.cp0().branch_delay());
+}
