@@ -67,3 +67,4 @@ The v0.6.0 annotated tag and published release were verified at `ca836f154868845
 
 - Batch 67 ([#4](https://github.com/boiledice06/mipsion/issues/4)) implemented separate stage latches, in-order integer ALU and memory operations, conservative RAW stalls, and retirement. All 655 tests and the batch gate passed. Control transfers are part of Batch 68.
 - Batch 68 ([#5](https://github.com/boiledice06/mipsion/issues/5)) resolved integer branches and jumps, including branch-likely annulment, at EX. Delay-slot faults, architectural retirement and self-modifying code were checked against the functional CPU. All 663 tests and the batch gate passed. Unsupported instructions stop at WB with a diagnostic.
+- Batch 69 ([#6](https://github.com/boiledice06/mipsion/issues/6)) added CLI engine selection, typed cycle events with terminal formatting, and debugger cycle stepping and reset. All 667 tests and the batch gate passed. The pipeline debugger has its own command set.

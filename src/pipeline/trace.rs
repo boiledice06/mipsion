@@ -50,3 +50,61 @@ pub struct CycleEvent {
     pub redirect: Option<Redirect>,
     pub flushed: bool,
 }
+
+/// Format a cycle trace for the CLI and debugger.
+pub fn format_cycle(event: &CycleEvent) -> String {
+    use std::fmt::Write;
+
+    fn address(pc: Option<u32>) -> String {
+        pc.map_or_else(|| "-".into(), |pc| format!("{pc:08X}"))
+    }
+    let state = event.registers;
+    let mut text = format!(
+        "[cycle {}] IF={} IF/ID={} ID/EX={} EX/MEM={} MEM/WB={}",
+        event.cycle,
+        address(event.fetched),
+        address(state.if_id),
+        address(state.id_ex),
+        address(state.ex_mem),
+        address(state.mem_wb),
+    );
+    if let Some(stall) = event.stall {
+        let Stall::RegisterDependency { pc, register } = stall;
+        let _ = write!(text, " stall {pc:08X} waiting for ${register}");
+    }
+    if let Some(redirect) = event.redirect {
+        let _ = write!(
+            text,
+            " redirect {:08X} -> {:08X}",
+            redirect.branch_pc, redirect.target
+        );
+    }
+    if event.flushed {
+        text.push_str(" flush");
+    }
+    match event.writeback {
+        Some(Writeback::Retired { pc, word }) => {
+            let _ = write!(text, " retire {pc:08X} {word:08X}");
+        }
+        Some(Writeback::Exception {
+            pc,
+            exception,
+            epc,
+            in_delay_slot,
+        }) => {
+            let _ = write!(
+                text,
+                " exception {exception:?} at {pc:08X} EPC={epc:08X} BD={in_delay_slot}"
+            );
+        }
+        Some(Writeback::Unsupported { pc, word, mnemonic }) => {
+            let _ = write!(
+                text,
+                " unsupported {} at {pc:08X} ({word:08X})",
+                mnemonic.unwrap_or("unknown")
+            );
+        }
+        None => {}
+    }
+    text
+}

@@ -23,8 +23,13 @@ fn main() -> ExitCode {
             println!("MIPSion {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
-        CliAction::Run(config) => run_program(config, false),
-        CliAction::RunSource(config) => run_program(config, true),
+        CliAction::Run(config) => run_program(config, false, None),
+        CliAction::RunSource(config) => run_program(config, true, None),
+        CliAction::RunPipeline {
+            config,
+            source,
+            max_cycles,
+        } => run_program(config, source, Some(max_cycles)),
         CliAction::Assemble {
             source,
             output,
@@ -76,7 +81,11 @@ fn write_assembly(source: &Path, output: &Path, load_address: u32) -> Result<(),
     Ok(())
 }
 
-fn run_program(config: cli::CliConfig, source: bool) -> Result<(), String> {
+fn run_program(
+    config: cli::CliConfig,
+    source: bool,
+    cycle_limit: Option<u64>,
+) -> Result<(), String> {
     use cpu::Cpu;
     use loader::load_raw;
     use memory::Memory;
@@ -138,6 +147,9 @@ fn run_program(config: cli::CliConfig, source: bool) -> Result<(), String> {
         println!("Stack:        {:#010X}", cpu.read_reg(29));
     }
 
+    if let Some(max_cycles) = cycle_limit {
+        return run_pipeline(config, cpu, memory, max_cycles);
+    }
     if config.debug {
         use mipsion::debugger::{DebuggerSession, run_repl};
 
@@ -173,25 +185,92 @@ fn run_program(config: cli::CliConfig, source: bool) -> Result<(), String> {
     println!("Final PC:     {:#010X}", result.final_pc);
     println!("Stop reason:  {:?}", result.reason);
 
+    print_dumps(&config, &cpu, &memory)
+}
+
+fn run_pipeline(
+    config: cli::CliConfig,
+    cpu: cpu::Cpu,
+    memory: memory::Memory,
+    max_cycles: u64,
+) -> Result<(), String> {
+    use mipsion::pipeline::{Pipeline, Writeback, format_cycle};
+    let mut pipeline = Pipeline::new(cpu, memory);
+    if config.debug {
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+        return mipsion::debugger::run_pipeline_repl(
+            pipeline,
+            stdin.lock(),
+            stdout.lock(),
+            max_cycles,
+        )
+        .map_err(|error| format!("debugger I/O error: {error}"));
+    }
+    let reason = loop {
+        if pipeline.retired() >= config.max_steps {
+            break "Retirement limit reached".into();
+        }
+        if pipeline.cycles() >= max_cycles {
+            break "Cycle limit reached".into();
+        }
+        let Some(event) = pipeline.cycle() else {
+            break "Halted".into();
+        };
+        if config.trace {
+            println!("{}", format_cycle(&event));
+        }
+        match event.writeback {
+            Some(Writeback::Unsupported { pc, word, mnemonic }) => {
+                return Err(format!(
+                    "unsupported pipeline instruction {} ({word:#010X}) at {pc:#010X}",
+                    mnemonic.unwrap_or("unknown")
+                ));
+            }
+            Some(Writeback::Exception {
+                exception,
+                epc,
+                in_delay_slot,
+                ..
+            }) if config.stop_on_exception => {
+                break format!("{exception:?} at EPC {epc:#010X} (delay slot: {in_delay_slot})");
+            }
+            _ => {}
+        }
+    };
+    println!();
+    println!("Pipeline execution finished");
+    println!("Cycles:       {}", pipeline.cycles());
+    println!("Retired:      {}", pipeline.retired());
+    println!("Final PC:     {:#010X}", pipeline.cpu().read_pc());
+    println!("Stop reason:  {reason}");
+    print_dumps(&config, pipeline.cpu(), pipeline.memory())
+}
+
+fn print_dumps(
+    config: &cli::CliConfig,
+    cpu: &cpu::Cpu,
+    memory: &memory::Memory,
+) -> Result<(), String> {
     if config.dump_registers {
         println!();
-        print!("{}", inspection::dump_registers(&cpu));
+        print!("{}", inspection::dump_registers(cpu));
     }
 
     if config.dump_cp0 {
         println!();
-        print!("{}", inspection::dump_cp0(&cpu));
+        print!("{}", inspection::dump_cp0(cpu));
     }
 
     if config.dump_fpu {
         println!();
-        print!("{}", inspection::dump_fpu(&cpu));
+        print!("{}", inspection::dump_fpu(cpu));
     }
 
     if let Some((address, size)) = config.dump_memory {
         println!();
 
-        print!("{}", inspection::dump_memory(&memory, address, size)?);
+        print!("{}", inspection::dump_memory(memory, address, size)?);
     }
 
     Ok(())

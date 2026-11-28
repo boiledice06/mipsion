@@ -5,7 +5,7 @@ mod stages;
 mod state;
 mod trace;
 
-pub use trace::{CycleEvent, PipelineRegisters, Redirect, Stall, Writeback};
+pub use trace::{CycleEvent, PipelineRegisters, Redirect, Stall, Writeback, format_cycle};
 
 use crate::{cpu::Cpu, memory::Memory};
 use stages::{decode_stage, execute, fetch, memory_stage, write_store};

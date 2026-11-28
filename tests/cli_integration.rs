@@ -232,3 +232,83 @@ fn cli_assembler_reports_the_input_path_and_source_location() {
     assert!(text.contains("invalid-assembly.s:2:21"), "{text}");
     assert!(text.contains("outside -32768..=32767"), "{text}");
 }
+
+#[test]
+fn cli_pipeline_runs_source_and_traces_redirect_and_writeback() {
+    let output = execute(
+        &[
+            "--pipeline",
+            "--source",
+            "examples/delay-slot.s",
+            "--trace",
+            "--dump-registers",
+        ],
+        "",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    for expected in [
+        "[cycle 1] IF=00000000",
+        "redirect 00000004 -> 00000010",
+        "retire 00000008",
+        "Syscall at EPC 0x0000001C",
+        "$t0   0000002A",
+        "$t2   0000005A",
+        "Retired:      6",
+    ] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+}
+
+#[test]
+fn cli_pipeline_debugger_cycles_and_resets() {
+    let output = execute(
+        &[
+            "--pipeline",
+            "--debug",
+            "examples/hello.bin",
+            "--max-cycles",
+            "2",
+        ],
+        "cycle 3\nreset\ncycle\npc\nquit\n",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("MIPSion Pipeline Debugger"), "{text}");
+    assert!(text.contains("Cycle limit reached"), "{text}");
+    assert!(text.contains("Pipeline reset"), "{text}");
+    assert_eq!(text.matches("[cycle 1]").count(), 2, "{text}");
+    assert!(text.contains("PC 0x00000000  Next PC 0x00000004"), "{text}");
+}
+
+#[test]
+fn cli_pipeline_honors_retirement_limit_and_preserves_functional_options() {
+    let output = execute(
+        &["--pipeline", "examples/hello.elf", "--max-steps", "1"],
+        "",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("Retirement limit reached"), "{text}");
+    assert!(text.contains("Retired:      1"), "{text}");
+    let invalid = execute(&["examples/hello.elf", "--max-cycles", "1"], "");
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(stderr(&invalid).contains("--max-cycles requires --pipeline"));
+}
+
+#[test]
+fn cli_pipeline_reports_unsupported_operation() {
+    let output = execute(
+        &[
+            "--pipeline",
+            "--source",
+            "tests/fixtures/unsupported-pipeline.s",
+        ],
+        "",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output)
+            .contains("unsupported pipeline instruction mfc0 (0x40086000) at 0x00000000")
+    );
+}
