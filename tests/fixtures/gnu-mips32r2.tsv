@@ -1,0 +1,201 @@
+# GNU binutils 2.44, MIPS32r2 little-endian, .text linked at zero
+46203105	abs.d $f4, $f6
+46003105	abs.s $f4, $f6
+012a4020	add $t0, $t1, $t2
+46283100	add.d $f4, $f6, $f8
+46083100	add.s $f4, $f6, $f8
+2128ff85	addi $t0, $t1, -123
+2528ff85	addiu $t0, $t1, -123
+012a4021	addu $t0, $t1, $t2
+012a4024	and $t0, $t1, $t2
+31289876	andi $t0, $t1, 0x9876
+450c00bd	bc1f $fcc3, target
+450e00bc	bc1fl $fcc3, target
+450d00bb	bc1t $fcc3, target
+450f00ba	bc1tl $fcc3, target
+112a00b9	beq $t1, $t2, target
+512a00b8	beql $t1, $t2, target
+052100b7	bgez $t1, target
+053100b6	bgezal $t1, target
+053300b5	bgezall $t1, target
+052300b4	bgezl $t1, target
+1d2000b3	bgtz $t1, target
+5d2000b2	bgtzl $t1, target
+192000b1	blez $t1, target
+592000b0	blezl $t1, target
+052000af	bltz $t1, target
+053000ae	bltzal $t1, target
+053200ad	bltzall $t1, target
+052200ac	bltzl $t1, target
+152a00ab	bne $t1, $t2, target
+552a00aa	bnel $t1, $t2, target
+0000000d	break
+46283332	c.eq.d $fcc3, $f6, $f8
+46083332	c.eq.s $fcc3, $f6, $f8
+46283330	c.f.d $fcc3, $f6, $f8
+46083330	c.f.s $fcc3, $f6, $f8
+4628333e	c.le.d $fcc3, $f6, $f8
+4608333e	c.le.s $fcc3, $f6, $f8
+4628333c	c.lt.d $fcc3, $f6, $f8
+4608333c	c.lt.s $fcc3, $f6, $f8
+4628333d	c.nge.d $fcc3, $f6, $f8
+4608333d	c.nge.s $fcc3, $f6, $f8
+4628333b	c.ngl.d $fcc3, $f6, $f8
+4608333b	c.ngl.s $fcc3, $f6, $f8
+46283339	c.ngle.d $fcc3, $f6, $f8
+46083339	c.ngle.s $fcc3, $f6, $f8
+4628333f	c.ngt.d $fcc3, $f6, $f8
+4608333f	c.ngt.s $fcc3, $f6, $f8
+46283336	c.ole.d $fcc3, $f6, $f8
+46083336	c.ole.s $fcc3, $f6, $f8
+46283334	c.olt.d $fcc3, $f6, $f8
+46083334	c.olt.s $fcc3, $f6, $f8
+4628333a	c.seq.d $fcc3, $f6, $f8
+4608333a	c.seq.s $fcc3, $f6, $f8
+46283338	c.sf.d $fcc3, $f6, $f8
+46083338	c.sf.s $fcc3, $f6, $f8
+46283333	c.ueq.d $fcc3, $f6, $f8
+46083333	c.ueq.s $fcc3, $f6, $f8
+46283337	c.ule.d $fcc3, $f6, $f8
+46083337	c.ule.s $fcc3, $f6, $f8
+46283335	c.ult.d $fcc3, $f6, $f8
+46083335	c.ult.s $fcc3, $f6, $f8
+46283331	c.un.d $fcc3, $f6, $f8
+46083331	c.un.s $fcc3, $f6, $f8
+4620310e	ceil.w.d $f4, $f6
+4600310e	ceil.w.s $f4, $f6
+4448f800	cfc1 $t0, $31
+71284021	clo $t0, $t1
+71284020	clz $t0, $t1
+44c8f800	ctc1 $t0, $31
+46003121	cvt.d.s $f4, $f6
+46803121	cvt.d.w $f4, $f6
+46203120	cvt.s.d $f4, $f6
+46803120	cvt.s.w $f4, $f6
+46203124	cvt.w.d $f4, $f6
+46003124	cvt.w.s $f4, $f6
+41686000	di $t0
+012a001a	div $t1, $t2
+46283103	div.d $f4, $f6, $f8
+46083103	div.s $f4, $f6, $f8
+012a001b	divu $t1, $t2
+000000c0	ehb
+41686020	ei $t0
+42000018	eret
+7d2851c0	ext $t0, $t1, 7, 11
+4620310f	floor.w.d $f4, $f6
+4600310f	floor.w.s $f4, $f6
+7d2889c4	ins $t0, $t1, 7, 11
+080000c8	j target
+0c0000c8	jal target
+01204009	jalr $t0, $t1
+01204409	jalr.hb $t0, $t1
+01200008	jr $t1
+01200408	jr.hb $t1
+8128fff4	lb $t0, -12($t1)
+9128fff4	lbu $t0, -12($t1)
+d524fff8	ldc1 $f4, -8($t1)
+8528fff4	lh $t0, -12($t1)
+9528fff4	lhu $t0, -12($t1)
+c128fff4	ll $t0, -12($t1)
+3c089876	lui $t0, 0x9876
+8d28fff4	lw $t0, -12($t1)
+c524fff8	lwc1 $f4, -8($t1)
+8928fff4	lwl $t0, -12($t1)
+9928fff4	lwr $t0, -12($t1)
+712a0000	madd $t1, $t2
+712a0001	maddu $t1, $t2
+40088001	mfc0 $t0, $16, 1
+44083000	mfc1 $t0, $f6
+44683000	mfhc1 $t0, $f6
+00004010	mfhi $t0
+00004012	mflo $t0
+46203106	mov.d $f4, $f6
+46003106	mov.s $f4, $f6
+012c4001	movf $t0, $t1, $fcc3
+462c3111	movf.d $f4, $f6, $fcc3
+460c3111	movf.s $f4, $f6, $fcc3
+012a400b	movn $t0, $t1, $t2
+462a3113	movn.d $f4, $f6, $t2
+460a3113	movn.s $f4, $f6, $t2
+012d4001	movt $t0, $t1, $fcc3
+462d3111	movt.d $f4, $f6, $fcc3
+460d3111	movt.s $f4, $f6, $fcc3
+012a400a	movz $t0, $t1, $t2
+462a3112	movz.d $f4, $f6, $t2
+460a3112	movz.s $f4, $f6, $t2
+712a0004	msub $t1, $t2
+712a0005	msubu $t1, $t2
+40888001	mtc0 $t0, $16, 1
+44883000	mtc1 $t0, $f6
+44e83000	mthc1 $t0, $f6
+01200011	mthi $t1
+01200013	mtlo $t1
+712a4002	mul $t0, $t1, $t2
+46283102	mul.d $f4, $f6, $f8
+46083102	mul.s $f4, $f6, $f8
+012a0018	mult $t1, $t2
+012a0019	multu $t1, $t2
+46203107	neg.d $f4, $f6
+46003107	neg.s $f4, $f6
+012a4027	nor $t0, $t1, $t2
+012a4025	or $t0, $t1, $t2
+35289876	ori $t0, $t1, 0x9876
+00000140	pause
+cd23fffc	pref 3, -4($t1)
+7c08103b	rdhwr $t0, $2
+002a4442	rotr $t0, $t2, 17
+012a4046	rotrv $t0, $t2, $t1
+4620310c	round.w.d $f4, $f6
+4600310c	round.w.s $f4, $f6
+a128fff4	sb $t0, -12($t1)
+e128fff4	sc $t0, -12($t1)
+f524fff8	sdc1 $f4, -8($t1)
+7c0a4420	seb $t0, $t2
+7c0a4620	seh $t0, $t2
+a528fff4	sh $t0, -12($t1)
+000a4440	sll $t0, $t2, 17
+012a4004	sllv $t0, $t2, $t1
+012a402a	slt $t0, $t1, $t2
+2928ff85	slti $t0, $t1, -123
+2d28ff85	sltiu $t0, $t1, -123
+012a402b	sltu $t0, $t1, $t2
+46203104	sqrt.d $f4, $f6
+46003104	sqrt.s $f4, $f6
+000a4443	sra $t0, $t2, 17
+012a4007	srav $t0, $t2, $t1
+000a4442	srl $t0, $t2, 17
+012a4006	srlv $t0, $t2, $t1
+00000040	ssnop
+012a4022	sub $t0, $t1, $t2
+46283101	sub.d $f4, $f6, $f8
+46083101	sub.s $f4, $f6, $f8
+012a4023	subu $t0, $t1, $t2
+ad28fff4	sw $t0, -12($t1)
+e524fff8	swc1 $f4, -8($t1)
+a928fff4	swl $t0, -12($t1)
+b928fff4	swr $t0, -12($t1)
+000000cf	sync 3
+053ffffc	synci -4($t1)
+0000000c	syscall
+012a0034	teq $t1, $t2
+052cff85	teqi $t1, -123
+012a0030	tge $t1, $t2
+0528ff85	tgei $t1, -123
+0529ff85	tgeiu $t1, -123
+012a0031	tgeu $t1, $t2
+42000008	tlbp
+42000001	tlbr
+42000002	tlbwi
+42000006	tlbwr
+012a0032	tlt $t1, $t2
+052aff85	tlti $t1, -123
+052bff85	tltiu $t1, -123
+012a0033	tltu $t1, $t2
+012a0036	tne $t1, $t2
+052eff85	tnei $t1, -123
+4620310d	trunc.w.d $f4, $f6
+4600310d	trunc.w.s $f4, $f6
+7c0a40a0	wsbh $t0, $t2
+012a4026	xor $t0, $t1, $t2
+39289876	xori $t0, $t1, 0x9876

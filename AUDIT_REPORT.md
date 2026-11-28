@@ -59,3 +59,38 @@ metadata path nor sparse-checkout entries.
 - Latency and replacement describe the educational single-core timing model.
   Hardware cacheability, device timing, multicore coherence and write-back
   are outside this profile.
+
+## Assembler audit — Batch 74
+
+| ID | Severity | Evidence and fix |
+| --- | --- | --- |
+| A05 | Medium | v0.8.0 accepted architecturally unpredictable `jalr $t0, $t0` and `bgezal $ra, 4`. The encoder now diagnoses identical JALR/JALR.HB link and target registers and register 31 as the source of the four conditional branch-and-link instructions. |
+| A06 | Medium | v0.8.0 assembled `ctc1 $t0, $0` and reserved basic FPU control selectors even though the functional CPU rejected those accesses. The assembler now permits FIR only for CFC1 and validates the other basic control selectors. CP0 register/selector fields retain their architectural bit ranges because actual availability is CPU-profile dependent. |
+| A07 | Low | A leading UTF-8 BOM in an otherwise valid Windows assembly file was parsed as part of the first mnemonic. It is now accepted. Diagnostics retain byte columns in the source text after the optional BOM. |
+
+The baseline matched GNU binutils 2.44 on all **200 of 200** representative
+forms. The fixed assembler also matches all 200, once each, with every
+supported mnemonic covered exactly once in the independent corpus.
+The corpus includes 105 mandatory CPU and 86 basic FPU forms. The nine
+remaining forms are functional CP0/TLB instructions. This is encoding
+coverage for representative operands and does not establish instruction
+execution conformance. Pseudoinstructions, section layout, range
+boundaries, malformed operands and source locations have separate tests.
+
+The golden file is `tests/fixtures/gnu-mips32r2.tsv`. To reproduce it, take
+the assembly column, remove its comment header, prepend `.set noreorder`,
+`.set nomacro`, `.set noat` and `.text`, and append `target:`. GNU uses
+`div $zero, rs, rt` and `divu $zero, rs, rt` to request the native
+encodings where MIPSion uses two operands. Run:
+
+```sh
+mipsel-linux-gnu-as -EL -mips32r2 -mabi=32 -mfp32 -mno-fix-loongson3-llsc --fatal-warnings -o gnu.o gnu.s
+mipsel-linux-gnu-ld -Ttext=0 -e 0 -o gnu.elf gnu.o
+mipsel-linux-gnu-objcopy -j .text -O binary gnu.elf gnu.bin
+```
+
+The `target` symbol was at `0x320`. The extracted 800-byte image had
+SHA-256 `774f97f7bf7e14213f7911064425ce87db9052376c7222e0860f252b583f717a`.
+No GNU executable is needed for the Rust regression suite.
+
+Batch 74 passed 691 tests on Windows, including four new library tests.
