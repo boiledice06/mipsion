@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.6.0 — Assembler
+v0.7.0 — Five-stage Pipeline Simulation
 
 | Metric | Status |
 | --- | ---: |
@@ -32,10 +32,10 @@ v0.6.0 — Assembler
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Internal regression tests | 621 / 621 passing |
+| Internal regression tests | 634 / 634 passing |
 | REPL integration tests | 16 / 16 passing |
-| CLI end-to-end tests | 13 / 13 passing |
-| Total tests | 650 / 650 passing |
+| CLI end-to-end tests | 17 / 17 passing |
+| Total tests | 667 / 667 passing |
 | External Rust dependencies | 0 |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Test results reflect verified local debug and release builds, not exhaustive ISA conformance or code coverage.
@@ -113,7 +113,7 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] Interactive command-line debugger
 - [x] REPL integration and CLI end-to-end tests
 - [x] Assembler
-- [ ] Five-stage pipeline simulation
+- [x] Five-stage pipeline simulation
 - [ ] Cache and hazard simulation
 - [ ] Graphical user interface
 
@@ -129,6 +129,7 @@ MIPSion separates the reusable emulation library from the command-line interface
 | `memory/` | Physical memory, MMU and TLB |
 | `isa/` | Instruction definitions, decoding, disassembly and field extraction |
 | `assembler/` | Source parsing, two-pass symbol resolution and instruction encoding |
+| `pipeline/` | Five-stage latches, timing, retirement and cycle events |
 | `loader/` | Raw binary and ELF32 executable loading |
 | `runtime/` | Execution control, tracing, hooks and state inspection |
 | `debugger/` | Debugger sessions, breakpoints, watchpoints, commands and REPL |
@@ -290,9 +291,47 @@ breakpoint and watchpoint configurations.
 
 The debugger is implemented entirely using the Rust standard library.
 
+## Five-stage pipeline
+
+```sh
+cargo run -- --pipeline --source examples/delay-slot.s --trace --dump-registers
+cargo run -- --pipeline --debug examples/hello.elf
+```
+
+The model is a single-issue, in-order IF/ID/EX/MEM/WB pipeline. EX computes
+results, branch targets and effective addresses. MEM checks and prepares
+loads and stores, and WB commits registers and stores in program order.
+The four interstage registers carry explicit valid entries or bubbles.
+RAW hazards stall ID and IF until the producer reaches WB.
+
+The supported subset covers ADD/ADDI/ADDIU/ADDU, SUB/SUBU, MUL, integer
+logic and comparisons, immediate and variable shifts/rotates, LUI,
+LB/LBU/LH/LHU/LW and SB/SH/SW, integer conditional and likely branches,
+J/JAL/JR/JALR (including the hazard-barrier encoding), and SYSCALL/BREAK.
+NOP is the zero SLL encoding. CP0/CP1 instructions, HI/LO-specific
+instructions, LL/SC and unaligned merge loads/stores are outside this model.
+The functional engine remains the default for those instruction families.
+
+Taken control transfers retain the delay slot. Untaken branch-likely
+instructions annul it. Faults and interrupts commit through CP0 at WB and
+flush younger work. An unsupported defined instruction stops at WB with
+its address and word. Branches or jumps in delay slots are reported as
+unsupported. CP0 Count advances at architectural instruction boundaries.
+
+`Pipeline::cycle` returns a typed `CycleEvent` with post-cycle latch PCs,
+fetch, stall, redirect, flush, and retirement or fault information. Calls
+to `pause_fetch` let occupied latches drain before `resume_fetch` restarts
+fetch. Trace formatting is separate from architectural effects.
+
+In pipeline CLI mode, `--max-cycles` bounds simulation and `--max-steps`
+bounds successful retirements. Exceptions are reported and stop execution
+by default. The pipeline debugger supports `cycle [count]`, `regs`, `cp0`,
+`pc`, `mem <address> <size>`, `reset` and `quit`. The standard debugger
+retains its original instruction stepping, breakpoints and watchpoints.
+
 ## Current Limitations
 
-- Functional instruction emulation, not cycle-accurate simulation.
+- The pipeline is an educational timing model for a documented integer subset.
 - Bare translation mode remains the default for compatibility.
 - TLB-backed translation is available through the TLB execution mode.
 - CPU fetch and data accesses include physical memory bounds checks and bus exceptions.
@@ -321,7 +360,7 @@ The debugger is implemented entirely using the Rust standard library.
 - CP0 and FPU register watchpoints are not yet supported.
 - Symbolic breakpoints and source-level debugging are not yet supported.
 - Command history, tab completion and asynchronous execution interruption are not yet supported.
-- Pipeline simulation, cache simulation and graphical interfaces are pending.
+- Cache simulation and graphical interfaces are pending.
 
 ## Goals
 

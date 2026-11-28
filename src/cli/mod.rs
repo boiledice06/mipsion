@@ -20,6 +20,11 @@ pub struct CliConfig {
 pub enum CliAction {
     Run(CliConfig),
     RunSource(CliConfig),
+    RunPipeline {
+        config: CliConfig,
+        source: bool,
+        max_cycles: u64,
+    },
     Assemble {
         source: PathBuf,
         output: PathBuf,
@@ -51,6 +56,8 @@ Options:
                                Display physical memory contents
     --trace                    Trace instruction execution
     --source                   Read the program as UTF-8 assembly
+    --pipeline                 Use the five-stage pipeline engine
+    --max-cycles <count>       Pipeline cycle limit (default: 5000000)
     --debug                    Start interactive debugger
 
 Numbers may be decimal or hexadecimal (0x prefix).
@@ -99,6 +106,8 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
 
     let mut debug = false;
     let mut source = false;
+    let mut pipeline = false;
+    let mut max_cycles = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -168,6 +177,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
                 trace = true;
             }
 
+            "--pipeline" => pipeline = true,
+
+            "--max-cycles" => max_cycles = Some(parse_number(&next_value(&mut args, &arg)?)?),
+
             "--source" => {
                 source = true;
             }
@@ -233,7 +246,16 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<CliAction, S
         trace,
         debug,
     };
-    Ok(if source {
+    if max_cycles.is_some() && !pipeline {
+        return Err("--max-cycles requires --pipeline".into());
+    }
+    Ok(if pipeline {
+        CliAction::RunPipeline {
+            config,
+            source,
+            max_cycles: max_cycles.unwrap_or(5_000_000),
+        }
+    } else if source {
         CliAction::RunSource(config)
     } else {
         CliAction::Run(config)

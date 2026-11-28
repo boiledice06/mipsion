@@ -68,6 +68,15 @@ impl Cpu {
     }
 
     pub fn peek_instruction(&self, memory: &Memory, address: u32) -> Result<u32, Exception> {
+        let physical = self.instruction_address(memory, address)?;
+        Ok(memory.read_word(physical))
+    }
+
+    pub(crate) fn instruction_address(
+        &self,
+        memory: &Memory,
+        address: u32,
+    ) -> Result<u32, Exception> {
         if address & 3 != 0 {
             return Err(Exception::AddressErrorLoad);
         }
@@ -78,7 +87,7 @@ impl Cpu {
             return Err(Exception::InstructionBusError);
         }
 
-        Ok(memory.read_word(physical))
+        Ok(physical)
     }
 
     pub fn fetch(&mut self, memory: &Memory) -> Option<u32> {
@@ -102,20 +111,7 @@ impl Cpu {
     }
 
     pub fn step(&mut self, memory: &mut Memory) {
-        self.last_instruction = None;
-
-        if self.halted {
-            return;
-        }
-
-        self.cp0.tick();
-
-        // Interrupt 검사
-        if self.cp0.interrupt_requested() {
-            self.current_pc = self.pc;
-            self.in_delay_slot = self.next_delay_slot;
-
-            self.raise_exception(Exception::Interrupt, None);
+        if !self.begin_step() {
             return;
         }
 
@@ -145,6 +141,44 @@ impl Cpu {
                 self.raise_exception(Exception::ReservedInstruction, None);
             }
         }
+    }
+
+    fn begin_step(&mut self) -> bool {
+        self.last_instruction = None;
+
+        if self.halted {
+            return false;
+        }
+
+        self.cp0.tick();
+
+        // Interrupt 검사
+        if self.cp0.interrupt_requested() {
+            self.current_pc = self.pc;
+            self.in_delay_slot = self.next_delay_slot;
+
+            self.raise_exception(Exception::Interrupt, None);
+            return false;
+        }
+
+        true
+    }
+
+    // The pipeline has already computed the instruction's effects. CP0 and
+    // architectural PC state are updated here in the same order as step().
+    pub(crate) fn begin_pipeline_step(&mut self, word: Option<u32>) -> bool {
+        if !self.begin_step() {
+            return false;
+        }
+        self.current_pc = self.pc;
+        self.in_delay_slot = self.next_delay_slot;
+        self.next_delay_slot = false;
+        if let Some(word) = word {
+            self.pc = self.next_pc;
+            self.next_pc = self.next_pc.wrapping_add(4);
+            self.last_instruction = Some(word);
+        }
+        true
     }
 
     pub fn read_hi(&self) -> u32 {
@@ -208,6 +242,10 @@ impl Cpu {
 
     pub fn cp1_mut(&mut self) -> &mut Cp1 {
         &mut self.cp1
+    }
+
+    pub(crate) fn next_instruction_is_delay_slot(&self) -> bool {
+        self.next_delay_slot
     }
 
     pub fn mark_delay_slot(&mut self) {
