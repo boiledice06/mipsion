@@ -1,4 +1,5 @@
 use super::control;
+use super::observation::AluSnapshot;
 use super::state::{
     Action, Decoded, Effect, Executed, Fault, Instruction, Issued, Prepared, Store, Width,
 };
@@ -12,6 +13,7 @@ pub(super) fn fetch(
     cpu: &Cpu,
     memory: &Memory,
     pc: u32,
+    sequence: u64,
     read: impl FnOnce(u32) -> u32,
 ) -> Instruction {
     let address = cpu.instruction_address(memory, pc).map_err(|exception| {
@@ -19,6 +21,7 @@ pub(super) fn fetch(
         Fault::new(exception, address)
     });
     Instruction {
+        sequence,
         pc,
         physical: address.ok(),
         delay_slot: false,
@@ -71,17 +74,24 @@ pub(super) fn decode_stage(instruction: Instruction) -> Result<Decoded, Action> 
 
 pub(super) fn execute(issued: Issued) -> Executed {
     let instruction = issued.instruction();
+    let mut alu = None;
     let effect = match issued {
         Issued::Ready(_, action) => Effect::Ready(action),
-        Issued::Operation(decoded, [a, b]) => execution_effect(decoded, a, b),
+        Issued::Operation(decoded, [a, b]) => execution_effect(decoded, a, b, &mut alu),
     };
     Executed {
         instruction,
         effect,
+        alu,
     }
 }
 
-fn execution_effect(decoded: Decoded, a: u32, b: u32) -> Effect {
+fn execution_effect(
+    decoded: Decoded,
+    a: u32,
+    b: u32,
+    observation: &mut Option<AluSnapshot>,
+) -> Effect {
     use Operation::*;
     let raw = RawInstruction::new(decoded.instruction.word.unwrap());
     if decoded.control {
@@ -94,20 +104,13 @@ fn execution_effect(decoded: Decoded, a: u32, b: u32) -> Effect {
     let signed = raw.immediate() as i16 as i32 as u32;
     let dest = decoded.destination.unwrap_or(0);
     let op = decoded.operation;
-    let result = match op {
-        Add | Sub | Addi => {
-            let b = if matches!(op, Addi) { signed } else { b };
-            let Some(value) = alu::checked_compute(a, b, op) else {
-                return Effect::Ready(Action::Fault(Fault::new(Exception::Overflow, None)));
-            };
-            value
-        }
-        Addu | Subu | And | Or | Xor | Nor | Slt | Sltu | Mul => alu::compute(a, b, op),
-        Sllv | Srav | Srlv | Rotrv => alu::compute(a, b & 31, op),
-        Addiu | Slti | Sltiu => alu::compute(a, signed, op),
-        Andi | Ori | Xori => alu::compute(a, u32::from(raw.immediate()), op),
-        Sll | Sra | Srl | Rotr => alu::compute(a, u32::from(raw.shamt()), op),
-        Lui => u32::from(raw.immediate()) << 16,
+    let (lhs, rhs) = match op {
+        Add | Sub | Addu | Subu | And | Or | Xor | Nor | Slt | Sltu | Mul => (a, b),
+        Sllv | Srav | Srlv | Rotrv => (a, b & 31),
+        Addi | Addiu | Slti | Sltiu => (a, signed),
+        Andi | Ori | Xori => (a, u32::from(raw.immediate())),
+        Sll | Sra | Srl | Rotr => (a, u32::from(raw.shamt())),
+        Lui => (0, u32::from(raw.immediate())),
         Lb | Lbu | Lh | Lhu | Lw => {
             let width = match op {
                 Lb | Lbu => Width::Byte,
@@ -135,7 +138,16 @@ fn execution_effect(decoded: Decoded, a: u32, b: u32) -> Effect {
         }
         _ => unreachable!("only supported operations reach EX"),
     };
-    Effect::Ready(Action::Write(dest, result))
+    let result = if matches!(op, Add | Sub | Addi) {
+        alu::checked_compute(lhs, rhs, op)
+    } else {
+        Some(alu::compute(lhs, rhs, op))
+    };
+    *observation = Some(AluSnapshot { lhs, rhs, result });
+    Effect::Ready(match result {
+        Some(value) => Action::Write(dest, value),
+        None => Action::Fault(Fault::new(Exception::Overflow, None)),
+    })
 }
 
 pub(super) fn memory_stage(

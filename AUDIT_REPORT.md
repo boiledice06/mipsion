@@ -172,3 +172,17 @@ access. Acceptance may wait while D blocks the front end. A D wait holds
 the EX/MEM instruction and prevents younger dispatch; an already-started I
 wait can count down. CPI and IPC use successful retirement and simulated
 cycles, and each is absent when its denominator is zero.
+
+## Observation API audit — Batch 77
+
+**Informational.** The compact `CycleEvent` summarized pipeline activity.
+The new inspection API adds owned latch state and fetch identity,
+observed ALU inputs/results, committed writes, physical memory requests,
+cache placement and CP0 state. This is an additive API. `cycle()` and
+terminal formatting retain their existing interfaces. [Pipeline inspection](docs/PIPELINE_INSPECTION.md)
+
+Six public-API integration tests check parity between observed and plain
+stepping, inspection purity and cold reset, instruction sequence and delay
+slots, actual ALU and memory values, cache set/way/tag and LRU invariance,
+self-modifying-code invalidation with a distinct refetch, and overflow
+flushing with no younger or partial committed effects.

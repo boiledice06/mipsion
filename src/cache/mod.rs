@@ -14,6 +14,14 @@ use line::Line;
 use replacement::least_recently_used;
 use std::collections::BTreeMap;
 
+/// Current location of a resident physical cache line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheLineLocation {
+    pub parts: AddressParts,
+    pub way: u32,
+    pub state: LineState,
+}
+
 pub struct Cache {
     config: CacheConfig,
     // Allocate backing storage only for sets and ways that have been touched.
@@ -48,6 +56,22 @@ impl Cache {
                 .get(&set)
                 .map_or_else(LineState::default, |lines| lines[way as usize].state),
         )
+    }
+
+    /// Inspect a resident address without issuing an access or touching its LRU state.
+    pub fn resident_line(&self, physical_address: u32) -> Option<CacheLineLocation> {
+        let parts = self.config.address(physical_address);
+        let (way, line) = self
+            .sets
+            .get(&parts.set)?
+            .iter()
+            .enumerate()
+            .find(|(_, line)| line.state.valid && line.state.tag == parts.tag)?;
+        Some(CacheLineLocation {
+            parts,
+            way: way as u32,
+            state: line.state,
+        })
     }
 
     /// Start one validated, single-line access. Width is between one and four bytes.
