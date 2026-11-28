@@ -3,6 +3,8 @@ pub mod mips32r2;
 pub mod decoder;
 pub mod instruction;
 
+pub mod disassembler;
+
 pub struct InstructionDef {
     pub mnemonic: &'static str,
     pub mask: u32,

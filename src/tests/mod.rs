@@ -3,6 +3,7 @@ mod control_flow;
 mod cp0;
 mod cp1;
 mod decoder;
+mod disassembler;
 mod elf;
 mod exception;
 mod fpu;
