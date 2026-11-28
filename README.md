@@ -22,7 +22,7 @@ The long-term goal is to provide an interactive graphical environment for execut
 
 ## Status
 
-v0.7.0 — Five-stage Pipeline Simulation
+v0.8.0 — Cache and Hazard Simulation
 
 | Metric | Status |
 | --- | ---: |
@@ -32,10 +32,10 @@ v0.7.0 — Five-stage Pipeline Simulation
 | Implemented (normal execution semantics) | 68 |
 | Partially implemented | 132 |
 | Pending | 91 |
-| Internal regression tests | 634 / 634 passing |
+| Internal regression tests | 646 / 646 passing |
 | REPL integration tests | 16 / 16 passing |
-| CLI end-to-end tests | 17 / 17 passing |
-| Total tests | 667 / 667 passing |
+| CLI end-to-end tests | 21 / 21 passing |
+| Total tests | 683 / 683 passing |
 | External Rust dependencies | 0 |
 
 The ISA count excludes three assembly idioms and includes optional instruction families. Test results reflect verified local debug and release builds, not exhaustive ISA conformance or code coverage.
@@ -114,7 +114,7 @@ The ISA count excludes three assembly idioms and includes optional instruction f
 - [x] REPL integration and CLI end-to-end tests
 - [x] Assembler
 - [x] Five-stage pipeline simulation
-- [ ] Cache and hazard simulation
+- [x] Cache and hazard simulation
 - [ ] Graphical user interface
 
 See [ISA_CHECKLIST.md](ISA_CHECKLIST.md) for instruction-level implementation and regression status.
@@ -130,6 +130,7 @@ MIPSion separates the reusable emulation library from the command-line interface
 | `isa/` | Instruction definitions, decoding, disassembly and field extraction |
 | `assembler/` | Source parsing, two-pass symbol resolution and instruction encoding |
 | `pipeline/` | Five-stage latches, timing, retirement and cycle events |
+| `cache/` | Cache geometry, lines, LRU, write-through and statistics |
 | `loader/` | Raw binary and ELF32 executable loading |
 | `runtime/` | Execution control, tracing, hooks and state inspection |
 | `debugger/` | Debugger sessions, breakpoints, watchpoints, commands and REPL |
@@ -302,7 +303,8 @@ The model is a single-issue, in-order IF/ID/EX/MEM/WB pipeline. EX computes
 results, branch targets and effective addresses. MEM checks and prepares
 loads and stores, and WB commits registers and stores in program order.
 The four interstage registers carry explicit valid entries or bubbles.
-RAW hazards stall ID and IF until the producer reaches WB.
+With default settings, RAW hazards stall ID and IF until the producer
+reaches WB. The cache and hazard model adds optional forwarding.
 
 The supported subset covers ADD/ADDI/ADDIU/ADDU, SUB/SUBU, MUL, integer
 logic and comparisons, immediate and variable shifts/rotates, LUI,
@@ -323,11 +325,55 @@ fetch, stall, redirect, flush, and retirement or fault information. Calls
 to `pause_fetch` let occupied latches drain before `resume_fetch` restarts
 fetch. Trace formatting is separate from architectural effects.
 
-In pipeline CLI mode, `--max-cycles` bounds simulation and `--max-steps`
+In noninteractive pipeline CLI mode, `--max-cycles` bounds simulation and `--max-steps`
 bounds successful retirements. Exceptions are reported and stop execution
 by default. The pipeline debugger supports `cycle [count]`, `regs`, `cp0`,
 `pc`, `mem <address> <size>`, `reset` and `quit`. The standard debugger
 retains its original instruction stepping, breakpoints and watchpoints.
+
+## Cache and hazard simulation
+
+```sh
+cargo run -- --pipeline --source examples/delay-slot.s --forwarding --cache --trace
+cargo run -- --pipeline --icache 1024:16:1 --dcache 2048:32:2 --memory-latency 4 examples/hello.elf
+cargo run -- --pipeline --cache --forwarding --debug examples/hello.elf
+```
+
+`--cache` enables separate instruction and data caches. Each defaults to
+1024 bytes, 16-byte lines and two ways. `--icache` and `--dcache` take
+`capacity:line_size:ways` in bytes and implicitly enable caching. A
+one-way cache is direct-mapped. Line sizes are powers of two of at least
+four bytes. A cache supports 1–16 ways and a power-of-two number of sets
+up to a capacity of 16 MiB. Replacement chooses the lowest available
+invalid way, then the least recently used line.
+
+The caches use physical addresses. A store allocates on a miss and
+updates both backing memory and the resident data line at retirement.
+Instruction lines covering the written address are invalidated. A
+younger in-flight fetch of the modified word is squashed and fetched
+again. Lines stay clean under write-through. The model covers one core
+and omits write-back, multicore coherence, devices, and cacheability
+attributes for different address segments.
+
+`--memory-latency` sets additional cycles per miss, eight by default.
+Hits add no extra cycles. IF and MEM each have space for one outstanding
+request. A data miss holds EX and the front end. An outstanding IF
+request may count down during a data wait. Fills and hit/miss counters are
+recorded at request time, so they include instruction fetches that are
+subsequently annulled or flushed.
+
+`--forwarding` enables EX/MEM and MEM/WB bypassing independently of the
+caches. A dependent load consumer waits until MEM supplies the value.
+Without forwarding, the conservative v0.7.0 interlocks remain available.
+
+`Pipeline::with_options` configures the library. `CycleEvent` exposes
+cache requests with their results, stalls, forwarded values, instruction
+line invalidation, redirects, flushes and WB outcomes. `Pipeline::statistics`
+reports cycles, successful retirements, and cache counts. CPI is cycles
+divided by retirements, and IPC is retirements divided by cycles. An
+absent denominator is printed as `n/a`. The debugger's `stats` command
+shows the same counters. Reset restores the initial machine state and
+starts with cold caches, preserving the configured geometry and latency.
 
 ## Current Limitations
 
@@ -341,7 +387,7 @@ retains its original instruction stepping, breakpoints and watchpoints.
 - Linux system calls and process initialization are not implemented.
 - Instruction tracing currently includes fetched instructions, GPR changes, HI/LO changes and exceptions.
 - CP0, TLB and exception behavior cover a limited architecture profile.
-- Cache behavior, execution hazards and full synchronization semantics are incomplete.
+- The cache model covers a single core and omits full synchronization semantics.
 - FPU support includes FR=0 register mapping, control registers, word/doubleword data transfers, basic single- and double-precision arithmetic, and S/D/W format conversions.
 - FCSR rounding and Invalid/Inexact exception handling are implemented for CVT.W and explicit word rounding instructions.
 - Comparisons support legacy NaN classification and Invalid Operation handling.
@@ -360,7 +406,7 @@ retains its original instruction stepping, breakpoints and watchpoints.
 - CP0 and FPU register watchpoints are not yet supported.
 - Symbolic breakpoints and source-level debugging are not yet supported.
 - Command history, tab completion and asynchronous execution interruption are not yet supported.
-- Cache simulation and graphical interfaces are pending.
+- Graphical interfaces are pending.
 
 ## Goals
 
