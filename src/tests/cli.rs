@@ -210,3 +210,54 @@ fn cli_trace_enabled() {
 
     assert!(config.trace);
 }
+
+#[test]
+fn cli_debug_default_disabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(!config.debug);
+}
+
+#[test]
+fn cli_debug_enabled() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) = parse_cli(&["--debug", "program.bin"]).unwrap() else {
+        panic!("expected Run action");
+    };
+
+    assert!(config.debug);
+}
+
+#[test]
+fn cli_debug_with_execution_limit() {
+    use crate::cli::CliAction;
+
+    let CliAction::Run(config) =
+        parse_cli(&["program.bin", "--debug", "--max-steps", "100"]).unwrap()
+    else {
+        panic!("expected Run action");
+    };
+
+    assert!(config.debug);
+    assert_eq!(config.max_steps, 100);
+}
+
+#[test]
+fn cli_debug_conflicting_options() {
+    for option in [
+        "--trace",
+        "--dump-registers",
+        "--dump-cp0",
+        "--dump-fpu",
+        "--continue-on-exception",
+    ] {
+        assert!(parse_cli(&["program.bin", "--debug", option,]).is_err());
+    }
+
+    assert!(parse_cli(&["program.bin", "--debug", "--dump-memory", "0", "4",]).is_err());
+}
