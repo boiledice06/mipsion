@@ -5,9 +5,10 @@ use crate::memory::Memory;
 use crate::runtime::inspection::{dump_cp0, dump_fpu, dump_memory, dump_registers};
 
 use crate::runtime::trace::{CpuSnapshot, TraceEvent};
-use crate::runtime::{ExecutionConfig, ExecutionResult, StopReason, run_with_stop_condition};
+use crate::runtime::{ExecutionConfig, ExecutionResult, StopReason, run_with_debug_hooks};
 
 use super::breakpoint::Breakpoints;
+use super::watchpoint::{WatchTarget, WatchpointHit, Watchpoints};
 
 pub struct DebuggerSession {
     cpu: Cpu,
@@ -21,6 +22,9 @@ pub struct DebuggerSession {
 
     breakpoints: Breakpoints,
     last_breakpoint: Option<u32>,
+
+    watchpoints: Watchpoints,
+    last_watchpoint_hits: Vec<WatchpointHit>,
 }
 
 impl DebuggerSession {
@@ -42,6 +46,8 @@ impl DebuggerSession {
 
             breakpoints: Breakpoints::new(),
             last_breakpoint: None,
+            watchpoints: Watchpoints::new(),
+            last_watchpoint_hits: Vec::new(),
         }
     }
 
@@ -110,6 +116,8 @@ impl DebuggerSession {
     }
 
     pub fn step(&mut self) -> Option<TraceEvent> {
+        self.last_watchpoint_hits.clear();
+
         if self.cpu.is_halted() {
             return None;
         }
@@ -122,6 +130,8 @@ impl DebuggerSession {
 
         self.steps = self.steps.saturating_add(1);
 
+        self.last_watchpoint_hits = self.watchpoints.detect_changes(&self.cpu, &self.memory);
+
         Some(TraceEvent::capture(self.steps, &before, &self.cpu))
     }
 
@@ -131,18 +141,36 @@ impl DebuggerSession {
             stop_on_exception: true,
         };
 
+        self.last_watchpoint_hits.clear();
+
         let mut skip_breakpoint = self.last_breakpoint == Some(self.pc());
 
         let breakpoints = &self.breakpoints;
+        let watchpoints = &mut self.watchpoints;
+        let hits = &mut self.last_watchpoint_hits;
 
-        let result = run_with_stop_condition(&mut self.cpu, &mut self.memory, config, |pc| {
-            if skip_breakpoint {
-                skip_breakpoint = false;
-                return false;
-            }
+        let result = run_with_debug_hooks(
+            &mut self.cpu,
+            &mut self.memory,
+            config,
+            |pc| {
+                if skip_breakpoint {
+                    skip_breakpoint = false;
+                    return false;
+                }
 
-            breakpoints.contains(pc)
-        });
+                breakpoints.contains(pc)
+            },
+            |cpu, memory| {
+                if watchpoints.is_empty() {
+                    return false;
+                }
+
+                *hits = watchpoints.detect_changes(cpu, memory);
+
+                !hits.is_empty()
+            },
+        );
 
         self.steps = self.steps.saturating_add(result.steps);
 
@@ -167,6 +195,10 @@ impl DebuggerSession {
 
         self.steps = 0;
         self.last_breakpoint = None;
+
+        self.last_watchpoint_hits.clear();
+
+        self.watchpoints.refresh(&self.cpu, &self.memory);
     }
 
     pub fn add_breakpoint(&mut self, address: u32) -> Result<bool, String> {
@@ -192,5 +224,30 @@ impl DebuggerSession {
     pub fn clear_breakpoints(&mut self) {
         self.breakpoints.clear();
         self.last_breakpoint = None;
+    }
+
+    pub fn add_watchpoint(&mut self, target: WatchTarget) -> Result<bool, String> {
+        self.watchpoints.add(target, &self.cpu, &self.memory)
+    }
+
+    pub fn remove_watchpoint(&mut self, target: WatchTarget) -> bool {
+        self.watchpoints.remove(target)
+    }
+
+    pub fn has_watchpoint(&self, target: WatchTarget) -> bool {
+        self.watchpoints.contains(target)
+    }
+
+    pub fn watchpoints(&self) -> &Watchpoints {
+        &self.watchpoints
+    }
+
+    pub fn clear_watchpoints(&mut self) {
+        self.watchpoints.clear();
+        self.last_watchpoint_hits.clear();
+    }
+
+    pub fn last_watchpoint_hits(&self) -> &[WatchpointHit] {
+        &self.last_watchpoint_hits
     }
 }

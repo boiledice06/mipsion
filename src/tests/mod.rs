@@ -18,6 +18,7 @@ mod mmu;
 mod runtime;
 mod tlb;
 mod trace;
+mod watchpoint;
 
 use crate::cpu::Cpu;
 use crate::memory::Memory;
